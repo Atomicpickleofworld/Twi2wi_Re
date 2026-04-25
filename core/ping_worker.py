@@ -1,0 +1,50 @@
+import time
+import socket
+import threading
+from PyQt6.QtCore import QThread, pyqtSignal
+
+class PingWorker(QThread):
+    result = pyqtSignal(str, int, float)
+
+    def __init__(self, hosts=None):
+        super().__init__()
+        self.hosts = list(hosts) if hosts else []
+        self.running = True
+        self.history = {name: [] for name, _ in self.hosts}
+        self.lock = threading.Lock()
+
+    def ping_host(self, host):
+        try:
+            start = time.time()
+            sock = socket.create_connection((host, 80), timeout=3)
+            sock.close()
+            return int((time.time() - start) * 1000)
+        except:
+            return -1
+
+    def run(self):
+        while self.running:
+            if not self.hosts:
+                time.sleep(1)
+                continue
+            for name, host in list(self.hosts):
+                if not self.running: break
+                ms = self.ping_host(host)
+                with self.lock:
+                    hist = self.history.setdefault(name, [])
+                    hist.append(ms)
+                    if len(hist) > 10: hist.pop(0)
+                    fails = sum(1 for x in hist if x == -1)
+                    loss = (fails / len(hist)) * 100.0 if hist else 0.0
+                self.result.emit(name, ms, loss)
+                time.sleep(0.5)
+            time.sleep(0.5)
+
+    def stop(self):
+        self.running = False
+        self.wait(2000)
+
+    def add_host(self, name, host):
+        with self.lock:
+            if name not in self.history: self.history[name] = []
+            self.hosts.append([name, host])
