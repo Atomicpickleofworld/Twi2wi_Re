@@ -8,7 +8,7 @@
 [![PyQt6](https://img.shields.io/badge/ui-PyQt6-orange.svg)](https://www.riverbankcomputing.com/software/pyqt/)
 
 <p align="center">
-  <img src="assets/logo.png" alt="Twi2wi_Re Logo" width="200"/>
+  <img src="assets/icon.png" alt="Twi2wi_Re Logo" width="200"/>
 </p>
 
 ## 📋 About
