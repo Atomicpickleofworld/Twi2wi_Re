@@ -6,7 +6,6 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 from utils.config import SINGBOX_PATH, AMNEZIAWG_PATH
 
-
 class SingBoxWorker(QThread):
     log_line = pyqtSignal(str)
     status_changed = pyqtSignal(bool)
@@ -17,7 +16,7 @@ class SingBoxWorker(QThread):
         self.config_type = config_type
         self.process = None
         self.running = True
-        self._used_awg = False  # 🔧 Флаг: использовался ли AWG в этой сессии
+        self._used_awg = False
 
     def is_awg_config(self, content):
         return "[Interface]" in content and ("Jc" in content or "Jmin" in content or "PrivateKey" in content)
@@ -97,7 +96,6 @@ class SingBoxWorker(QThread):
             self.status_changed.emit(False)
             return
 
-        # 🔧 Валидация JSON
         try:
             import json
             with open(self.config_path, "r", encoding="utf-8") as f:
@@ -116,7 +114,6 @@ class SingBoxWorker(QThread):
             self.log_line.emit(f"[>] Запуск sing-box: {Path(self.config_path).name}")
             self.log_line.emit(f"[>] Полный путь: {self.config_path}")
 
-            # 🔧 Проверяем версию sing-box
             try:
                 version_out = subprocess.check_output(
                     [str(SINGBOX_PATH), "version"],
@@ -136,10 +133,9 @@ class SingBoxWorker(QThread):
                 bufsize=1
             )
 
-            # 🔧 Ждём инициализацию
             init_ok = False
             start_time = time.time()
-            while time.time() - start_time < 5.0:  # Увеличил до 5 сек
+            while time.time() - start_time < 5.0:
                 if not self.running:
                     self.process.terminate()
                     return
@@ -149,13 +145,11 @@ class SingBoxWorker(QThread):
                 ln = line.strip()
                 if ln:
                     self.log_line.emit(ln)
-                    # 🔧 Детектим успешный старт
                     if any(ok in ln.lower() for ok in [
                         "started", "listening", "mixed-in",
                         "router: updated", "tun", "interface"
                     ]):
                         init_ok = True
-                    # 🔧 Детектим ошибки
                     if any(err in ln.lower() for err in [
                         "fatal", "parse error", "failed to",
                         "invalid config", "decode config", "error"
@@ -174,7 +168,6 @@ class SingBoxWorker(QThread):
                 self.status_changed.emit(False)
                 return
 
-            # Основной цикл
             for line in iter(self.process.stdout.readline, ''):
                 if not self.running:
                     break
@@ -196,7 +189,6 @@ class SingBoxWorker(QThread):
     def stop(self):
         self.running = False
 
-        # Остановка sing-box
         if self.process:
             try:
                 self.process.terminate()
@@ -208,7 +200,6 @@ class SingBoxWorker(QThread):
                     pass
             self.process = None
 
-        # 🔧 Остановка AWG только если он реально использовался в этой сессии
         if self._used_awg and AMNEZIAWG_PATH.exists() and sys.platform == "win32":
             cf = subprocess.CREATE_NO_WINDOW
             tunnel = "twi2wi_tunnel"

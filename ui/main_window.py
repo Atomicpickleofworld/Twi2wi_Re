@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from PyQt6.QtGui import QCursor
@@ -959,6 +960,11 @@ class VPNManager(QMainWindow):
 
     def connect_vpn(self):
         self.connect_timeout_timer.stop()
+        # 🔑 Защита от двойного клика: останавливаем предыдущий воркер
+        if self.singbox_worker and self.singbox_worker.isRunning():
+            self.disconnect_vpn()
+            time.sleep(0.3)
+
         if not self.selected_config:
             QMessageBox.warning(self, "Нет конфига", "Сначала выбери конфиг!")
             return
@@ -970,10 +976,9 @@ class VPNManager(QMainWindow):
         self.big_status.setText("● ОЖИДАНИЕ...")
         self.big_status.setStyleSheet(
             "color: #FFC107; font-size: 28px; font-weight: bold; background: transparent; padding: 0px;")
-        self.status_dot.setObjectName("status_dot_waiting");
+        self.status_dot.setObjectName("status_dot_waiting")
         self.status_text.setText("ОЖИДАНИЕ...")
-        self.status_text.setStyleSheet(
-            "color: #FFC107; font-size: 11px; letter-spacing: 1px; background: transparent;")
+        self.status_text.setStyleSheet("color: #FFC107; font-size: 11px; letter-spacing: 1px; background: transparent;")
 
         if config_type.lower() in ['amneziawg', 'wireguard']:
             self.active_config_path = ACTIVE_CONFIG_CONF
@@ -985,7 +990,7 @@ class VPNManager(QMainWindow):
         except Exception as e:
             logging.error(f"Ошибка записи: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить конфиг:\n{e}")
-            self.on_status_changed(False);
+            self.on_status_changed(False)
             return
 
         self.append_log(f"[i] Активный конфиг: {self.active_config_path.name}")
@@ -1024,20 +1029,21 @@ class VPNManager(QMainWindow):
         if connected:
             st, clr = "ПОДКЛЮЧЁН", "#4CAF50"
             self.status_dot.setObjectName("status_dot_connected")
-            self.plugin_manager.trigger_hook("on_connect", config=self.selected_config)
+            # 🔑 Безопасный вызов плагин-менеджера
+            if hasattr(self, 'plugin_manager') and self.plugin_manager:
+                self.plugin_manager.trigger_hook("on_connect", config=self.selected_config)
         else:
             st, clr = "ОТКЛЮЧЁН", "#C62828"
             self.status_dot.setObjectName("status_dot_disconnected")
-            self.plugin_manager.trigger_hook("on_disconnect")
+            if hasattr(self, 'plugin_manager') and self.plugin_manager:
+                self.plugin_manager.trigger_hook("on_disconnect")
 
         self.connect_btn.setText("■  ОТКЛЮЧИТЬ" if connected else "▶  ПОДКЛЮЧИТЬ")
         self.top_connect_btn.setText("■  ОТКЛЮЧИТЬ" if connected else "▶  ПОДКЛЮЧИТЬ")
-        self.big_status.setText("●  " + st)
-        self.big_status.setStyleSheet(
-            f"color: {clr}; font-size: 28px; font-weight: bold; background: transparent; padding: 0px;  ")
+        self.big_status.setText("● " + st)
+        self.big_status.setStyleSheet(f"color: {clr}; font-size: 28px; font-weight: bold; background: transparent; padding: 0px;")
         self.status_text.setText(st)
-        self.status_text.setStyleSheet(
-            f"color: {clr}; font-size: 11px; letter-spacing: 1px; background: transparent; ")
+        self.status_text.setStyleSheet(f"color: {clr}; font-size: 11px; letter-spacing: 1px; background: transparent;")
 
         if self.selected_config:
             self.active_label.setText(f"Конфиг: {self.selected_config['name']}")
@@ -1045,16 +1051,21 @@ class VPNManager(QMainWindow):
             self.active_label.setText("Конфиг не выбран")
 
     def append_log(self, line):
-        self.plugin_manager.trigger_hook("on_log", line=line)
+        # 🔑 Безопасный вызов плагин-менеджера
+        if hasattr(self, 'plugin_manager') and self.plugin_manager:
+            self.plugin_manager.trigger_hook("on_log", line=line)
         try:
             low = line.lower()
-            if "command" in low and "amneziawg" in low and "returned non-zero" in low: return
+            if "command" in low and "amneziawg" in low and "returned non-zero" in low:
+                return
             self.log_view.append(line)
         except:
             pass
         low = line.lower()
-        if "local ip" in low or "assigned local" in low: self.append_system_message(f"Найден локальный IP: {line}")
-        if "handshake" in low: self.append_system_message(f"Handshake: {line}")
+        if "local ip" in low or "assigned local" in low:
+            self.append_system_message(f"Найден локальный IP: {line}")
+        if "handshake" in low:
+            self.append_system_message(f"Handshake: {line}")
 
     def append_system_message(self, msg):
         try:

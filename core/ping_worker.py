@@ -1,11 +1,10 @@
 import time
 import socket
-import threading  # 🔧 ДОБАВЛЕНО!
+import threading
 import subprocess
 import sys
 import re
 from PyQt6.QtCore import QThread, pyqtSignal
-
 
 class PingWorker(QThread):
     result = pyqtSignal(str, int, float)
@@ -18,25 +17,25 @@ class PingWorker(QThread):
         self.lock = threading.Lock()
 
     def ping_host(self, host):
-        """Настоящий ICMP ping через системную утилиту"""
         try:
             if sys.platform == "win32":
-                # Windows: используем ping.exe
+                # 🔑 Ключевой фикс: creationflags=subprocess.CREATE_NO_WINDOW
                 result = subprocess.run(
                     ["ping", "-n", "1", "-w", "3000", host],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=5
+                    timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 output = result.stdout.decode("cp866", errors="ignore")
 
-                # Парсим время ответа: "Ответ от ... время=XXмс"
-                match = re.search(r"время[=<](\d+)мс", output)
+                # Парсим русский вывод
+                match = re.search(r"время[= <](\d+)мс", output)
                 if match:
                     return int(match.group(1))
 
-                # Альтернативный формат: "time[=<]XXms"
-                match = re.search(r"time[=<](\d+)ms", output)
+                # Парсим английский вывод
+                match = re.search(r"time[= <](\d+)ms", output)
                 if match:
                     return int(match.group(1))
 
@@ -50,7 +49,7 @@ class PingWorker(QThread):
                     timeout=5
                 )
                 output = result.stdout.decode("utf-8", errors="ignore")
-                match = re.search(r"time[=<](\d+(?:\.\d+)?)\s*ms", output)
+                match = re.search(r"time[= <](\d+(?:\.\d+)?)\s*ms", output)
                 if match:
                     return int(float(match.group(1)))
                 return -1
