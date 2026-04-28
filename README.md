@@ -8,7 +8,7 @@
 [![PyQt6](https://img.shields.io/badge/ui-PyQt6-orange.svg)](https://www.riverbankcomputing.com/software/pyqt/)
 
 <p align="center">
-  <img src="assets/icon.png" alt="Twi2wi_Re Logo" width="200"/>
+  <img src="assets/logo.png" alt="Twi2wi_Re Logo" width="200"/>
 </p>
 
 ## 📋 About
@@ -28,9 +28,11 @@
   - Parse links (`vless://`, `vmess://`, `trojan://`, `wg://`, etc.)
   - Edit, rename, delete profiles
   - Favorites for quick access
-- 🧩 Plugin-ready architecture *(WIP)*
+- 🧩 Plugin-ready architecture *(UI tab exists, functionality WIP)*
 - 🪟 Wintun integration for stable Windows networking
 - 🛡️ Requires administrator privileges for network interface management
+
+> 💡 **Note about Plugins tab**: The Plugins section is currently visual-only. The interface is implemented, but backend functionality is under development. Future updates will enable custom plugin support.
 
 ## ⚠️ Important
 
@@ -109,7 +111,7 @@ Twi2wi_Re/
 │   ├── config.py           # Paths and settings
 │   ├── helpers.py          # Utilities: detect_type, get_system_info
 │   ├── url_parser.py       # Parse VPN links to sing-box JSON
-│   └── plugin_manager.py   # Plugin system *(commented out)*
+│   └── plugin_manager.py   # Plugin system *(scaffolded, WIP)*
 │
 ├── assets/                 # Resources: icons, images
 │   └── logo.png
@@ -154,6 +156,7 @@ Simply paste a link into the import field — the config will be automatically c
 - [ ] Built-in config editor
 - [ ] Auto-connect on startup
 - [ ] Private servers support
+- [ ] Plugins backend implementation 🔌
 
 ## 💬 Disclaimer
 
