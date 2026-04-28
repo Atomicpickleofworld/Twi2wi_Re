@@ -1,7 +1,11 @@
 import time
 import socket
-import threading
+import threading  # 🔧 ДОБАВЛЕНО!
+import subprocess
+import sys
+import re
 from PyQt6.QtCore import QThread, pyqtSignal
+
 
 class PingWorker(QThread):
     result = pyqtSignal(str, int, float)
@@ -14,12 +18,45 @@ class PingWorker(QThread):
         self.lock = threading.Lock()
 
     def ping_host(self, host):
+        """Настоящий ICMP ping через системную утилиту"""
         try:
-            start = time.time()
-            sock = socket.create_connection((host, 80), timeout=3)
-            sock.close()
-            return int((time.time() - start) * 1000)
-        except:
+            if sys.platform == "win32":
+                # Windows: используем ping.exe
+                result = subprocess.run(
+                    ["ping", "-n", "1", "-w", "3000", host],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=5
+                )
+                output = result.stdout.decode("cp866", errors="ignore")
+
+                # Парсим время ответа: "Ответ от ... время=XXмс"
+                match = re.search(r"время[=<](\d+)мс", output)
+                if match:
+                    return int(match.group(1))
+
+                # Альтернативный формат: "time[=<]XXms"
+                match = re.search(r"time[=<](\d+)ms", output)
+                if match:
+                    return int(match.group(1))
+
+                return -1
+            else:
+                # Linux/macOS
+                result = subprocess.run(
+                    ["ping", "-c", "1", "-W", "3", host],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=5
+                )
+                output = result.stdout.decode("utf-8", errors="ignore")
+                match = re.search(r"time[=<](\d+(?:\.\d+)?)\s*ms", output)
+                if match:
+                    return int(float(match.group(1)))
+                return -1
+
+        except Exception as e:
+            print(f"Ping error for {host}: {e}")
             return -1
 
     def run(self):
@@ -28,12 +65,14 @@ class PingWorker(QThread):
                 time.sleep(1)
                 continue
             for name, host in list(self.hosts):
-                if not self.running: break
+                if not self.running:
+                    break
                 ms = self.ping_host(host)
                 with self.lock:
                     hist = self.history.setdefault(name, [])
                     hist.append(ms)
-                    if len(hist) > 10: hist.pop(0)
+                    if len(hist) > 10:
+                        hist.pop(0)
                     fails = sum(1 for x in hist if x == -1)
                     loss = (fails / len(hist)) * 100.0 if hist else 0.0
                 self.result.emit(name, ms, loss)
@@ -46,5 +85,6 @@ class PingWorker(QThread):
 
     def add_host(self, name, host):
         with self.lock:
-            if name not in self.history: self.history[name] = []
+            if name not in self.history:
+                self.history[name] = []
             self.hosts.append([name, host])

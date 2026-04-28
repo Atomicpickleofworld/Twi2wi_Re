@@ -37,4 +37,46 @@ QScrollArea { background: transparent; border: none; }
 #fav_btn[fav="true"] { color: #FFB74D; }
 #menu_btn { color: #7A5C9A; font-size: 16px; border: none; background: transparent; padding: 0; }
 #fav_section { background: transparent; border: none; color: #7A5C9A; font-size: 11px; letter-spacing: 3px; padding: 8px 0 4px 0; }
+# === ПЛАГИНЫ ===
+QFrame#plugin_card {
+    background: #FDFCF9;
+    border: 1px solid #E8DFF0;
+    border-radius: 12px;
+    margin-bottom: 0px;
+}
+QFrame#plugin_card[state="enabled"] {
+    background: #FDFCF9;
+    border-color: #E8DFF0;
+}
+QFrame#plugin_card[state="disabled"] {
+    background: #EAE5F0;
+    border-color: #D0C8DA;
+}
+QFrame#plugin_card[state="error"] {
+    background: #FFF9E6;
+    border-color: #FFC107;
+}
+QFrame#plugin_card:hover {
+    border-color: #FF9E43;
+}
+#status_indicator {
+    font-size: 10px;
+    font-weight: bold;
+    min-width: 80px;
+    text-align: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+#status_indicator[status="active"] {
+    color: #2E7D32;
+    background: rgba(76, 175, 80, 0.1);
+}
+#status_indicator[status="disabled"] {
+    color: #C62828;
+    background: rgba(155, 45, 48, 0.08);
+}
+#status_indicator[status="error"] {
+    color: #F57C00;
+    background: rgba(255, 193, 7, 0.15);
+}
 """

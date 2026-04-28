@@ -1,4 +1,5 @@
 import sys
+import os
 import platform
 import socket
 import uuid
@@ -13,6 +14,8 @@ def detect_type(content):
 
 def get_system_info():
     info = []
+    cf = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
     info.append("🖥️ ВЕРСИИ И ПЛАТФОРМА")
     info.append(f"Python: {platform.python_version()}")
     info.append(f"OS: {platform.system()} {platform.release()}")
@@ -23,14 +26,23 @@ def get_system_info():
     info.append("📦 ПРОТОКОЛЫ / УТИЛИТЫ")
     info.append(f"sing-box: {'✓ найден' if SINGBOX_PATH.exists() else '✗ отсутствует'}")
     info.append(f"AmneziaWG: {'✓ найден' if AMNEZIAWG_PATH.exists() else '✗ отсутствует'}")
+
+    # sing-box version — поддерживает аргумент "version"
     try:
-        v = subprocess.check_output([str(SINGBOX_PATH), "version"], text=True).splitlines()[0]
+        v = subprocess.check_output(
+            [str(SINGBOX_PATH), "version"],
+            text=True, creationflags=cf, timeout=3
+        ).splitlines()[0]
         info.append(f"  → {v}")
     except: pass
+
+    # amneziawg.exe НЕ поддерживает --version — просто показываем размер файла
     try:
-        v = subprocess.check_output([str(AMNEZIAWG_PATH), "--version"], text=True).splitlines()[0]
-        info.append(f"  → {v}")
+        if AMNEZIAWG_PATH.exists():
+            size_kb = os.path.getsize(str(AMNEZIAWG_PATH)) // 1024
+            info.append(f"  → amneziawg.exe ({size_kb} KB)")
     except: pass
+
     info.append("")
     info.append("🌐 СЕТЕВОЙ АДАПТЕР")
     try:
@@ -44,7 +56,10 @@ def get_system_info():
     info.append(f"CPU: {platform.processor() or 'N/A'}")
     try:
         if sys.platform == "win32":
-            ram = subprocess.check_output("wmic computersystem get totalphysicalmemory", shell=True, text=True).split()[1]
+            ram = subprocess.check_output(
+                "wmic computersystem get totalphysicalmemory",
+                shell=True, text=True, creationflags=cf
+            ).split()[1]
             info.append(f"RAM: {int(ram) / (1024 ** 3):.1f} GB")
     except: info.append("RAM: N/A")
     return "\n".join(info)

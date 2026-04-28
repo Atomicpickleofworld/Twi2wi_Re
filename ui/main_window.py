@@ -1,17 +1,23 @@
 import json
 from pathlib import Path
+
+from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QPushButton, QLabel, QListWidget, QListWidgetItem,
                              QFileDialog, QInputDialog, QMessageBox, QFrame, QStackedWidget,
-                             QTextEdit, QScrollArea, QLineEdit, QSizePolicy, QMenu)
-from PyQt6.QtCore import Qt, QTimer
+                             QTextEdit, QScrollArea, QLineEdit, QSizePolicy, QMenu, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer, QEvent
 from ui.styles import STYLE
 from ui.widgets import ConfigCard
 from core.ping_worker import PingWorker
 from core.vpn_worker import SingBoxWorker
-from utils.config import DATA_DIR, CONF_DIR, CONFIGS_FILE, ACTIVE_CONFIG_JSON, ACTIVE_CONFIG_CONF
+from utils.config import CONF_DIR, CONFIGS_FILE, ACTIVE_CONFIG_JSON, ACTIVE_CONFIG_CONF
 from utils.helpers import detect_type, get_system_info
+# from utils.plugin_manager import PluginManager
+from utils.url_parser import url_to_singbox_json, SUPPORTED_SCHEMES
 import logging
+from PyQt6.QtCore import Qt, QTimer
+from utils.version import __version__, __app_name__
 
 
 class VPNManager(QMainWindow):
@@ -34,8 +40,12 @@ class VPNManager(QMainWindow):
         self.init_ui()
         self.start_ping_monitor()
 
+        # self.plugin_manager = PluginManager(app_context=self, base_dir=Path(__file__).resolve().parent.parent)
+        # self.plugin_manager.scan_and_load()
+
     def closeEvent(self, event):
         print("Закрытие приложения...")
+        # self.plugin_manager.unload_all()
         self.connect_timeout_timer.stop()
         try:
             if hasattr(self, "singbox_worker") and self.singbox_worker and self.singbox_worker.isRunning():
@@ -50,19 +60,43 @@ class VPNManager(QMainWindow):
         event.accept()
 
     def load_configs(self):
-        CONFIGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if CONFIGS_FILE.exists():
-            try:
-                self.configs = json.loads(CONFIGS_FILE.read_text())
-            except:
+        """Загрузка конфигов с защитой от ошибок"""
+        try:
+            CONFIGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if CONFIGS_FILE.exists():
+                content = CONFIGS_FILE.read_text(encoding="utf-8")
+                if content.strip():
+                    self.configs = json.loads(content)
+                    logging.info(f"Загружено {len(self.configs)} конфигов")
+                else:
+                    self.configs = []
+                    logging.warning("configs.json пустой")
+            else:
                 self.configs = []
-        for c in self.configs: c.setdefault("favorite", False)
+                logging.info("configs.json не найден, создан пустой список")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки конфигов: {e}")
+            self.configs = []
+
+        # 🔧 Гарантируем наличие favorite у всех конфигов
+        for c in self.configs:
+            c.setdefault("favorite", False)
 
     def save_configs(self):
-        CONFIGS_FILE.write_text(json.dumps(self.configs, ensure_ascii=False, indent=2))
+        """Сохранение конфигов с логированием"""
+        try:
+            CONFIGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CONFIGS_FILE.write_text(
+                json.dumps(self.configs, ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
+            logging.info(f"Сохранено {len(self.configs)} конфигов")
+        except Exception as e:
+            logging.error(f"Ошибка сохранения конфигов: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить конфиги:\n{e}")
 
     def init_ui(self):
-        self.setWindowTitle("Twi2wi Re v1.3.0")
+        self.setWindowTitle(f"{__app_name__} v{__version__}")
         self.setMinimumSize(950, 620)
         self.setStyleSheet(STYLE)
         central = QWidget()
@@ -80,8 +114,8 @@ class VPNManager(QMainWindow):
         logo = QLabel("◈ Twi2wi_Re");
         logo.setObjectName("logo_label");
         sl.addWidget(logo)
-        ver = QLabel("v1.3.0 Re");
-        ver.setObjectName("version_label");
+        ver = QLabel(f"v{__version__} Re Edition")
+        ver.setObjectName("version_label")
         sl.addWidget(ver)
 
         status_frame = QFrame()
@@ -103,7 +137,7 @@ class VPNManager(QMainWindow):
         sl.addSpacing(8)
 
         self.nav_btns = []
-        for n, p in [("◎  ПОДКЛЮЧЕНИЕ", 0), ("  КОНФИГИ", 1), ("◈  ПИНГ", 2), ("≡  СИСТЕМА", 3)]:
+        for n, p in [("ПОДКЛЮЧЕНИЕ", 0), ("КОНФИГИ", 1), ("ПИНГ", 2), ("СИСТЕМА", 3), ("ПЛАГИНЫ", 4)]:
             b = QPushButton(n);
             b.setObjectName("nav_btn");
             b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -125,6 +159,7 @@ class VPNManager(QMainWindow):
         self.pages.addWidget(self.build_configs_page())
         self.pages.addWidget(self.build_ping_page())
         self.pages.addWidget(self.build_sys_page())
+        self.pages.addWidget(self.build_plugins_page())
         self.switch_page(0)
 
     def switch_page(self, idx):
@@ -166,13 +201,11 @@ class VPNManager(QMainWindow):
         cl.addWidget(self.active_label)
         l.addWidget(card)
 
-        # 🔹 СПЛИТ: ЛЕВАЯ (списки) + ПРАВАЯ (инфо)
         split_frame = QFrame()
         split_layout = QHBoxLayout(split_frame)
         split_layout.setContentsMargins(0, 0, 0, 0)
         split_layout.setSpacing(16)
 
-        # Левая колонка
         left_col = QVBoxLayout()
         self.fav_title = QLabel("⭐ ИЗБРАННОЕ");
         self.fav_title.setObjectName("fav_section");
@@ -183,8 +216,6 @@ class VPNManager(QMainWindow):
         self.fav_list.itemClicked.connect(self.on_quick_select)
         self.fav_list.setMaximumHeight(110)
         self.fav_list.hide()
-
-        # 🔧 Плавная прокрутка
         self.fav_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.fav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.fav_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -235,7 +266,6 @@ class VPNManager(QMainWindow):
         self.quick_list.itemClicked.connect(self.on_quick_select)
         left_col.addWidget(self.quick_list, 1)
 
-        # Правая колонка
         self.info_panel = QWidget()
         info_layout = QVBoxLayout(self.info_panel)
         info_layout.setContentsMargins(0, 0, 0, 0);
@@ -398,6 +428,311 @@ class VPNManager(QMainWindow):
         l.addLayout(r)
         return w
 
+
+    def build_plugins_page(self):
+        w = QWidget()
+        l = QVBoxLayout(w)
+        l.setContentsMargins(32, 32, 32, 32)
+        l.setSpacing(16)
+
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(12)
+        self.plugin_search = QLineEdit()
+        self.plugin_search.setPlaceholderText("🔍 Поиск плагинов по названию...")
+        self.plugin_search.textChanged.connect(self.filter_plugins)
+        top_bar.addWidget(self.plugin_search, 1)
+
+        self.plugin_add_btn = QPushButton("+")
+        self.plugin_add_btn.setObjectName("add_btn")
+        self.plugin_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.plugin_add_btn.setToolTip("Добавить плагин")
+        self.plugin_add_btn.clicked.connect(self.show_import_menu)
+        top_bar.addWidget(self.plugin_add_btn)
+        l.addLayout(top_bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border:none; background:transparent;")
+        self.plugin_container = QWidget()
+        self.plugin_layout = QVBoxLayout(self.plugin_container)
+        self.plugin_layout.setSpacing(8)
+        self.plugin_layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(self.plugin_container)
+        l.addWidget(scroll, 1)
+
+        # 🔧 Обновлённая структура данных (добавлены icon и fullDescription)
+        self.plugins_data = [
+            # {"id": "traffic_mon", "name": "📊 Traffic Monitor", "desc": "Отслеживание трафика в реальном времени",
+            #  "ver": "1.2.0", "enabled": True, "icon": "📈",
+            #  "fullDescription": "Мониторинг входящего и исходящего трафика с графиками и статистикой за сессию. Поддерживает экспорт отчетов в CSV."},
+            # {"id": "auto_reconnect", "name": "🔄 Auto Reconnect", "desc": "Автоматическое переподключение при обрыве",
+            #  "ver": "0.9.1", "enabled": False, "icon": "🔁",
+            #  "fullDescription": "Следит за стабильностью соединения. При потере пинга или разрыве туннеля автоматически инициирует переподключение к выбранному серверу."},
+            # {"id": "geo_ip", "name": "🌍 Geo IP Checker", "desc": "Проверка IP и страны после подключения",
+            #  "ver": "1.0.0", "enabled": True, "icon": "🌐",
+            #  "fullDescription": "Автоматически определяет ваш внешний IP-адрес и страну после успешного подключения к VPN. Показывает флаг и провайдера."},
+            # {"id": "theme_switch", "name": "🎨 Theme Switcher", "desc": "Переключение светлой/тёмной темы",
+            #  "ver": "0.5.0", "enabled": False, "icon": "🎭",
+            #  "fullDescription": "Позволяет быстро менять интерфейс приложения. Доступны: Светлая, Тёмная и Акцентная темы оформления."}
+        ]
+
+        self.render_plugins()  # ← вызываем отрисовку
+        return w
+
+    def create_plugin_card(self, plugin):
+        """Создаёт карточку плагина с правильными стилями"""
+        card = QFrame()
+        card.setObjectName("plugin_card")
+        card.plugin_ref = plugin
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.installEventFilter(self)
+
+        # Применяем стиль в зависимости от состояния
+        if plugin.get("has_error", False):
+            card.setProperty("state", "error")
+        elif plugin["enabled"]:
+            card.setProperty("state", "enabled")
+        else:
+            card.setProperty("state", "disabled")
+
+        # Основной layout
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(12)
+
+        # Иконка
+        icon = QLabel(plugin.get("icon", "🧩"))
+        icon.setStyleSheet("font-size: 22px; min-width: 28px;")
+        layout.addWidget(icon)
+
+        # Информационный блок
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(2)
+
+        name = QLabel(plugin["name"])
+        name.setObjectName("card_title")
+        desc = QLabel(plugin["desc"])
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #7A5C9A; font-size: 11px;")
+        version = QLabel(f"v{plugin['ver']}")
+        version.setStyleSheet("color: #9B8AAE; font-size: 10px;")
+
+        info_layout.addWidget(name)
+        info_layout.addWidget(desc)
+        info_layout.addWidget(version)
+        layout.addWidget(info_widget, 1)
+
+        # Статус (ВКЛ/ВЫКЛ/ОШИБКА)
+        if plugin.get("has_error", False):
+            status_text = "ОШИБКА"
+            status_color = "#F57C00"
+        elif plugin["enabled"]:
+            status_text = "ВКЛ"
+            status_color = "#4CAF50"
+        else:
+            status_text = "ВЫКЛ"
+            status_color = "#9b2d30"
+
+        status_label = QLabel(status_text)
+        status_label.setStyleSheet(f"""
+            color: {status_color};
+            font-size: 11px;
+            font-weight: bold;
+            min-width: 45px;
+            text-align: center;
+        """)
+        layout.addWidget(status_label)
+
+        # Кнопка меню
+        menu_btn = QPushButton("⋮")
+        menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_btn.setFixedSize(28, 28)
+        menu_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background: transparent;
+                font-size: 18px;
+                color: #7A5C9A;
+            }
+            QPushButton:hover {
+                color: #FF9E43;
+            }
+        """)
+        menu_btn.clicked.connect(lambda checked=False, p=plugin: self.show_plugin_menu(p))
+        layout.addWidget(menu_btn)
+
+        # Сохраняем ссылки на динамические элементы
+        card.status_label = status_label
+
+        return card
+
+    def apply_plugin_style(self, card, state):
+        """Принудительно применяет стиль к карточке плагина"""
+        card.setProperty("state", state)
+        card.style().unpolish(card)
+        card.style().polish(card)
+
+        for child in card.findChildren(QWidget):
+            child.style().unpolish(child)
+            child.style().polish(child)
+
+    def render_plugins(self, filter_text=""):
+        """Перерисовывает список плагинов с учётом фильтра"""
+        # Очистка
+        while self.plugin_layout.count():
+            item = self.plugin_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Фильтрация
+        visible = []
+        for p in self.plugins_data:
+            if not filter_text or filter_text.lower() in p["name"].lower():
+                visible.append(p)
+
+        # Создание карточек
+        for i, plugin in enumerate(visible):
+            card = self.create_plugin_card(plugin)
+            self.plugin_layout.addWidget(card)
+
+            # Разделитель (кроме последнего)
+            if i < len(visible) - 1:
+                separator = QFrame()
+                separator.setObjectName("plugin_sep")
+                separator.setFrameShape(QFrame.Shape.HLine)
+                separator.setFixedHeight(1)
+                separator.setStyleSheet("background-color: #E8DFF0; margin: 4px 12px;")
+                self.plugin_layout.addWidget(separator)
+
+        self.plugin_layout.addStretch()
+
+    def eventFilter(self, obj, event):
+        """Обрабатывает клики по карточкам плагинов"""
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if hasattr(obj, "plugin_ref") and obj.objectName() == "plugin_card":
+                plugin = obj.plugin_ref
+
+                # Переключаем состояние
+                if not plugin.get("has_error", False):
+                    plugin["enabled"] = not plugin["enabled"]
+
+                # Обновляем property для CSS
+                if plugin.get("has_error", False):
+                    obj.setProperty("state", "error")
+                    status_text = "ОШИБКА"
+                    status_color = "#F57C00"
+                elif plugin["enabled"]:
+                    obj.setProperty("state", "enabled")
+                    status_text = "ВКЛ"
+                    status_color = "#4CAF50"
+                else:
+                    obj.setProperty("state", "disabled")
+                    status_text = "ВЫКЛ"
+                    status_color = "#9b2d30"
+
+                # Принудительно обновляем стиль карточки
+                obj.style().unpolish(obj)
+                obj.style().polish(obj)
+
+                # Обновляем текст статуса
+                if hasattr(obj, "status_label"):
+                    obj.status_label.setText(status_text)
+                    obj.status_label.setStyleSheet(f"""
+                        color: {status_color};
+                        font-size: 11px;
+                        font-weight: bold;
+                        min-width: 45px;
+                        text-align: center;
+                    """)
+
+                self.append_log(f"[i] Плагин «{plugin['name']}» {'включён' if plugin['enabled'] else 'отключён'}")
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def filter_plugins(self, text):
+        self.render_plugins(text)
+
+    def view_full_description(self, plugin):
+        desc = plugin.get("fullDescription", "Описание отсутствует.")
+        QMessageBox.information(self, f"Описание: {plugin['name']}", desc)
+
+    def show_plugin_menu(self, plugin):
+        menu = QMenu(self)
+        act_desc = menu.addAction("📖 Полное описание")
+
+        # 🔧 Демо-пункт для переключения ошибки (удалишь позже)
+        act_err = menu.addAction("🟡 Переключить ошибку" if not plugin.get("has_error") else "🟢 Убрать ошибку")
+
+        menu.addSeparator()
+        act_del = menu.addAction("🗑️ Удалить плагин")
+
+        action = menu.exec(QCursor.pos())
+        if action == act_desc:
+            self.view_full_description(plugin)
+        elif action == act_err:
+            plugin["has_error"] = not plugin.get("has_error", False)
+            self.render_plugins(self.plugin_search.text())
+        elif action == act_del:
+            self.delete_plugin(plugin)
+    def delete_plugin(self, plugin):
+        if QMessageBox.question(self, "Удаление", f"Удалить плагин «{plugin['name']}»?") == QMessageBox.StandardButton.Yes:
+            self.plugins_data.remove(plugin)
+            self.append_log(f"[i] Плагин «{plugin['name']}» удален")
+            self.render_plugins(self.plugin_search.text())
+
+    def toggle_plugin(self, plugin, state):
+        plugin["enabled"] = (state == Qt.CheckState.Checked)
+        status = "✅ включен" if plugin["enabled"] else "❌ выключен"
+        self.append_log(f"[i] Плагин «{plugin['name']}» {status}")
+        # 🔜 Здесь будет вызов PluginManager.enable/disable()
+
+    def show_import_menu(self):
+        """Меню импорта: с устройства или по ссылке"""
+        menu = QMenu(self)
+        act_file = menu.addAction("📁 Выбрать с устройства (.zip)")
+        act_git = menu.addAction("🌐 Импорт по ссылке GitHub")
+
+        action = menu.exec(self.plugin_add_btn.mapToGlobal(self.plugin_add_btn.rect().bottomRight()))
+        if action == act_file:
+            self.import_plugin_file()
+        elif action == act_git:
+            self.import_plugin_git()
+
+    def import_plugin_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Выберите архив плагина", "", "ZIP архивы (*.zip)")
+        if path:
+            # 🔜 Логика: копирование в plugins/, проверка plugin.json, распаковка
+            self.append_log(f"[i] Выбран плагин: {Path(path).name}")
+            self.plugins_data.append({
+                "id": Path(path).stem.lower(),
+                "name": f"📦 {Path(path).stem}",
+                "desc": "Импортирован с устройства (ожидает активации)",
+                "ver": "0.0.1",
+                "enabled": True
+            })
+            self.render_plugins()
+            QMessageBox.information(self, "Импорт",
+                                    "Плагин добавлен в список!\nЛогика распаковки будет подключена на следующем этапе.")
+
+    def import_plugin_git(self):
+        url, ok = QInputDialog.getText(self, "GitHub ссылка", "Вставь прямую ссылку на .zip или репозиторий:")
+        if ok and url.strip():
+            # 🔜 Логика: requests.get(url) -> сохранение -> распаковка
+            self.append_log(f"[i] Загрузка плагина из GitHub: {url}")
+            self.plugins_data.append({
+                "id": url.split("/")[-1].lower().replace(".zip", ""),
+                "name": f"🌐 {url.split('/')[-1].replace('.zip', '')}",
+                "desc": "Импортирован с GitHub (ожидает проверки)",
+                "ver": "0.0.1",
+                "enabled": True
+            })
+            self.render_plugins()
+            QMessageBox.information(self, "Импорт",
+                                    "Запрос на скачивание отправлен!\nЛогика загрузки будет подключена на следующем этапе.")
+
     def refresh_quick_list(self):
         self.fav_list.clear()
         self.quick_list.clear()
@@ -416,6 +751,8 @@ class VPNManager(QMainWindow):
 
     def _add_card_to_list(self, lst, cfg):
         item = QListWidgetItem()
+        # 🔧 Храним ссылку на cfg прямо в item — индексы больше не нужны
+        item.setData(Qt.ItemDataRole.UserRole, cfg)
         card = ConfigCard(cfg, parent=lst)
         item.setSizeHint(card.sizeHint())
         lst.addItem(item)
@@ -425,23 +762,26 @@ class VPNManager(QMainWindow):
         self.config_list.clear()
         for c in self.configs:
             item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, c)
             card = ConfigCard(c, parent=self.config_list)
             item.setSizeHint(card.sizeHint())
             self.config_list.addItem(item)
             self.config_list.setItemWidget(item, card)
 
     def on_config_select(self, item):
-        idx = self.config_list.currentRow()
-        if 0 <= idx < len(self.configs):
-            self.selected_config = self.configs[idx]
-            self.preview.setPlainText(self.selected_config.get("content", "")[:2000] + (
-                "..." if len(self.selected_config.get("content", "")) > 2000 else ""))
+        # 🔧 Берём cfg из данных item — не из индекса
+        cfg = item.data(Qt.ItemDataRole.UserRole)
+        if cfg:
+            self.selected_config = cfg
+            self.preview.setPlainText(cfg.get("content", "")[:2000] + (
+                "..." if len(cfg.get("content", "")) > 2000 else ""))
             self._update_right_panel()
 
     def on_quick_select(self, item):
-        idx = self.quick_list.currentRow()
-        if 0 <= idx < len(self.configs):
-            self.selected_config = self.configs[idx]
+        # 🔧 Берём cfg из данных item — не из индекса
+        cfg = item.data(Qt.ItemDataRole.UserRole)
+        if cfg:
+            self.selected_config = cfg
             self._update_right_panel()
 
     def _update_right_panel(self):
@@ -465,18 +805,88 @@ class VPNManager(QMainWindow):
         self.refresh_quick_list()
 
     def add_config_url(self):
-        url, ok = QInputDialog.getText(self, "Добавить по ссылке",
-                                       "Вставь ссылку (vmess://, vless://, ss://, trojan://, hy2://):")
-        if ok and url.strip():
+        schemes = ", ".join(SUPPORTED_SCHEMES)
+        url, ok = QInputDialog.getText(
+            self, "Добавить по ссылке",
+            f"Поддерживаемые протоколы:\n{schemes}\n\nВставь ссылку:"
+        )
+        if not ok or not url.strip():
+            return
+
+        url = url.strip()
+        scheme = url.split("://")[0].lower() if "://" in url else ""
+
+        # AWG/WireGuard
+        if scheme in ("amneziawg", "wireguard") or (
+                "[Interface]" in url and ("Jc" in url or "PrivateKey" in url)
+        ):
             name, _ = QInputDialog.getText(self, "Название", "Название конфига:")
-            safe_name = (name or "link_config").replace(" ", "_") + ".conf"
-            new_path = CONF_DIR / safe_name;
+            safe_name = (name or "awg_config").replace(" ", "_") + ".conf"
+            new_path = CONF_DIR / safe_name
             new_path.write_text(url, encoding="utf-8")
-            self.configs.append(
-                {"name": name or url[:30], "type": url.split("://")[0], "content": url, "path": str(new_path)})
-            self.save_configs();
-            self.refresh_config_list();
+            self.configs.append({
+                "name": name or safe_name,
+                "type": "amneziawg",
+                "content": url,
+                "path": str(new_path)
+            })
+            self.save_configs()
+            self.refresh_config_list()
             self.refresh_quick_list()
+            # 🔧 Фикс краша — отложенный показ
+            QTimer.singleShot(0, lambda: QMessageBox.information(
+                self, "Добавлено", "✓ AWG конфиг сохранён"
+            ))
+            return
+
+        # Парсинг прокси-ссылки
+        try:
+            from utils.url_parser import parse_proxy_url
+            config_dict, proto = parse_proxy_url(url)
+            import json as _json
+            content = _json.dumps(config_dict, ensure_ascii=False, indent=2)
+        except ValueError as e:
+            QMessageBox.critical(self, "Ошибка парсинга", str(e))
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось разобрать ссылку:\n{e}")
+            return
+
+        # Имя конфига
+        import urllib.parse as _up
+        auto_name = _up.unquote(url.split("#")[1]) if "#" in url else ""
+        name, _ = QInputDialog.getText(
+            self, "Название", "Название конфига:",
+            text=auto_name
+        )
+        final_name = name.strip() or auto_name or url[:30]
+        safe_name = final_name.replace(" ", "_").replace("/", "_") + ".json"
+        new_path = CONF_DIR / safe_name
+        new_path.write_text(content, encoding="utf-8")
+
+        self.configs.append({
+            "name": final_name,
+            "type": proto,
+            "content": content,
+            "path": str(new_path)
+        })
+        self.save_configs()
+
+        # 🔧 Безопасное обновление списков
+        try:
+            self.refresh_config_list()
+            self.refresh_quick_list()
+        except Exception as e:
+            logging.error(f"Ошибка обновления UI: {e}")
+            return
+
+        # 🔧 ГЛАВНЫЙ ФИКС — отложенный QMessageBox через QTimer
+        QTimer.singleShot(0, lambda: QMessageBox.information(
+            self, "Добавлено",
+            f"✓ Конфиг «{final_name}» добавлен\n"
+            f"Протокол: {proto.upper()}\n"
+            f"Сохранён в папку configs/"
+        ))
 
     def add_config_text(self):
         t, ok = QInputDialog.getMultiLineText(self, "Вставить конфиг", "JSON или raw-конфиг:")
@@ -492,11 +902,12 @@ class VPNManager(QMainWindow):
             self.refresh_quick_list()
 
     def delete_config(self):
-        idx = self.config_list.currentRow()
-        if idx < 0 or idx >= len(self.configs):
+        item = self.config_list.currentItem()
+        cfg = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not cfg or cfg not in self.configs:
             QMessageBox.warning(self, "Внимание", "Сначала выбери конфиг из списка!")
             return
-        cfg = self.configs[idx]
+        idx = self.configs.index(cfg)
         if QMessageBox.question(self, "Удалить", f"Удалить «{cfg.get('name')}»?") == QMessageBox.StandardButton.Yes:
             cfg_path = cfg.get("path", "")
             if cfg_path and Path(cfg_path).exists():
@@ -561,7 +972,8 @@ class VPNManager(QMainWindow):
             "color: #FFC107; font-size: 28px; font-weight: bold; background: transparent; padding: 0px;")
         self.status_dot.setObjectName("status_dot_waiting");
         self.status_text.setText("ОЖИДАНИЕ...")
-        self.status_text.setStyleSheet("color: #FFC107; font-size: 11px; letter-spacing: 1px; background: transparent;")
+        self.status_text.setStyleSheet(
+            "color: #FFC107; font-size: 11px; letter-spacing: 1px; background: transparent;")
 
         if config_type.lower() in ['amneziawg', 'wireguard']:
             self.active_config_path = ACTIVE_CONFIG_CONF
@@ -585,6 +997,8 @@ class VPNManager(QMainWindow):
         self.singbox_worker.start()
         self.connect_timeout_timer.start(10000)
 
+
+
     def _handle_connect_timeout(self):
         if not self.is_connected:
             self.append_log("[!] Таймаут подключения.")
@@ -606,20 +1020,24 @@ class VPNManager(QMainWindow):
     def on_status_changed(self, connected):
         self.connect_timeout_timer.stop()
         self.is_connected = connected
+
         if connected:
             st, clr = "ПОДКЛЮЧЁН", "#4CAF50"
             self.status_dot.setObjectName("status_dot_connected")
+            self.plugin_manager.trigger_hook("on_connect", config=self.selected_config)
         else:
             st, clr = "ОТКЛЮЧЁН", "#C62828"
             self.status_dot.setObjectName("status_dot_disconnected")
+            self.plugin_manager.trigger_hook("on_disconnect")
 
         self.connect_btn.setText("■  ОТКЛЮЧИТЬ" if connected else "▶  ПОДКЛЮЧИТЬ")
         self.top_connect_btn.setText("■  ОТКЛЮЧИТЬ" if connected else "▶  ПОДКЛЮЧИТЬ")
-        self.big_status.setText("● " + st)
+        self.big_status.setText("●  " + st)
         self.big_status.setStyleSheet(
-            f"color: {clr}; font-size: 28px; font-weight: bold; background: transparent; padding: 0px; ")
+            f"color: {clr}; font-size: 28px; font-weight: bold; background: transparent; padding: 0px;  ")
         self.status_text.setText(st)
-        self.status_text.setStyleSheet(f"color: {clr}; font-size: 11px; letter-spacing: 1px; background: transparent;")
+        self.status_text.setStyleSheet(
+            f"color: {clr}; font-size: 11px; letter-spacing: 1px; background: transparent; ")
 
         if self.selected_config:
             self.active_label.setText(f"Конфиг: {self.selected_config['name']}")
@@ -627,6 +1045,7 @@ class VPNManager(QMainWindow):
             self.active_label.setText("Конфиг не выбран")
 
     def append_log(self, line):
+        self.plugin_manager.trigger_hook("on_log", line=line)
         try:
             low = line.lower()
             if "command" in low and "amneziawg" in low and "returned non-zero" in low: return

@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+import json
 from pathlib import Path
 
 if getattr(sys, 'frozen', False):
@@ -8,19 +9,24 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 
-DATA_DIR = Path(os.getenv("APPDATA")) / "Twi2wi"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-CONF_DIR = DATA_DIR / "conf"
-CONF_DIR.mkdir(exist_ok=True)
+# 🔧 Новая папка конфигов рядом с приложением
+CONF_DIR = BASE_DIR / "configs"
+CONF_DIR.mkdir(parents=True, exist_ok=True)
 
-CONFIGS_FILE = DATA_DIR / "configs.json"
+CONFIGS_FILE = BASE_DIR / "configs.json"
 ACTIVE_CONFIG_JSON = CONF_DIR / "active_config.json"
 ACTIVE_CONFIG_CONF = CONF_DIR / "active_config.conf"
 SINGBOX_PATH = BASE_DIR / "sing-box.exe"
 AMNEZIAWG_PATH = BASE_DIR / "amneziawg.exe"
 
+# 🔧 Создаём пустой configs.json если нет
+if not CONFIGS_FILE.exists():
+    CONFIGS_FILE.write_text("[]", encoding="utf-8")
+
+
 logging.basicConfig(
     filename=str(BASE_DIR / "vpn_debug.log"),
     level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    encoding="utf-8"
 )
