@@ -36,7 +36,6 @@ def get_system_info():
         info.append(f"  → {v}")
     except: pass
 
-    # amneziawg.exe НЕ поддерживает --version — просто показываем размер файла
     try:
         if AMNEZIAWG_PATH.exists():
             size_kb = os.path.getsize(str(AMNEZIAWG_PATH)) // 1024

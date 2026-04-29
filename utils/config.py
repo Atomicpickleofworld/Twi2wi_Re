@@ -9,17 +9,14 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 🔧 Новая папка конфигов рядом с приложением
 CONF_DIR = BASE_DIR / "configs"
 CONF_DIR.mkdir(parents=True, exist_ok=True)
 
 CONFIGS_FILE = BASE_DIR / "configs.json"
 ACTIVE_CONFIG_JSON = CONF_DIR / "active_config.json"
 ACTIVE_CONFIG_CONF = CONF_DIR / "active_config.conf"
-SINGBOX_PATH = BASE_DIR / "sing-box.exe"
-AMNEZIAWG_PATH = BASE_DIR / "amneziawg.exe"
-
-# 🔧 Создаём пустой configs.json если нет
+SINGBOX_PATH    = BASE_DIR / "bin" / "sing-box.exe"
+AMNEZIAWG_PATH  = BASE_DIR / "bin" / "amneziawg.exe"
 if not CONFIGS_FILE.exists():
     CONFIGS_FILE.write_text("[]", encoding="utf-8")
 

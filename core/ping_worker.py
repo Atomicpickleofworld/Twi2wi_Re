@@ -19,7 +19,6 @@ class PingWorker(QThread):
     def ping_host(self, host):
         try:
             if sys.platform == "win32":
-                # 🔑 Ключевой фикс: creationflags=subprocess.CREATE_NO_WINDOW
                 result = subprocess.run(
                     ["ping", "-n", "1", "-w", "3000", host],
                     stdout=subprocess.PIPE,
@@ -29,12 +28,10 @@ class PingWorker(QThread):
                 )
                 output = result.stdout.decode("cp866", errors="ignore")
 
-                # Парсим русский вывод
                 match = re.search(r"время[= <](\d+)мс", output)
                 if match:
                     return int(match.group(1))
 
-                # Парсим английский вывод
                 match = re.search(r"time[= <](\d+)ms", output)
                 if match:
                     return int(match.group(1))

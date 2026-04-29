@@ -1,105 +1,104 @@
+# 🧩 Twi2wi_Re: Plugin Developer's Guide
 
-# 🧩 Twi2wi_Re: Руководство разработчика плагинов
+> **API Version:** 1.0 (Subprocess Isolation)
 
-> **Версия API:** 1.0 (Subprocess Isolation)
+## 🔒 Security Architecture (Important!)
 
-## 🔒 Архитектура безопасности (Важно!)
+Plugins in Twi2wi_Re operate not as a library within the program, but as **isolated processes (Subprocess)**.
 
-Плагины в Twi2wi_Re работают не как библиотека внутри программы, а как **изолированные процессы (Subprocess)**.
+✅ **What a plugin can do:**
+* Read application configs (via API).
+* Log its actions.
+* Send notifications to the UI.
+* Handle events (Connection, Disconnection, Log).
 
-✅ **Что может плагин:**
-*   Читать конфиги приложения (через API).
-*   Логировать свои действия.
-*   Отправлять уведомления в UI.
-*   Обрабатывать события (Подключение, Отключение, Лог).
+❌ **What a plugin can't do (Blocked):**
+* `import os`, `import sys`, `import socket`
+* `import requests`, `import urllib` (No network access!)
+* `open()` outside its folder.
+* Read/write Windows/Linux files.
 
-❌ **Что НЕ может плагин (Заблокировано):**
-*   `import os`, `import sys`, `import socket`
-*   `import requests`, `import urllib` (Нет доступа к сети!)
-*   `open()` за пределами своей папки.
-*   Читать/писать файлы Windows/Linux.
+## 📁 Plugin Structure
 
-## 📁 Структура плагина
-
-Создай папку `my_plugin` и в ней два файла:
+Create a `my_plugin` folder and two files in it:
 
 ```text
 plugins/my_plugin/
-├── plugin.json    # ← Паспорт плагина
-└── main.py        # ← Код плагина
+├── plugin.json # ← Plugin Passport
+└── main.py # ← Plugin Code
 ```
 
 ### 1. `plugin.json`
 
 ```json
 {
-  "id": "my_plugin_unique_id",
-  "name": "Мой Супер Плагин",
-  "version": "1.0.0",
-  "entry": "main.py",
-  "permissions": [
-    "hooks:read",
-    "notify:ui",
-    "log:read"
-  ]
+"id": "my_plugin_unique_id",
+"name": "My Super Plugin",
+"version": "1.0.0",
+"entry": "main.py",
+"permissions": [
+"hooks:read",
+"notify:ui",
+"log:read"
+]
 }
 ```
 
-**Доступные права (Permissions):**
-*   `hooks:read` — (Обязательно) Позволяет получать события от приложения.
-*   `notify:ui` — Разрешает вызывать всплывающие уведомления.
-*   `log:read` — Разрешает читать логи подключения.
-*   `network:http` — *(Зарезервировано, пока не работает из-за изоляции)*.
+**Available Permissions:**
+* `hooks:read` — (Required) Allows receiving events from the application.
+* `notify:ui` — Enables pop-up notifications.
+* `log:read` — Enables reading connection logs.
+* `network:http` — *(Reserved, not currently supported due to isolation)*.
 
 ### 2. `main.py`
 
-Ваш плагин получает объект `ctx` (Context) первым аргументом во все функции.
+Your plugin receives the `ctx` (Context) object as the first argument to all functions.
 
 ```python
 # plugins/my_plugin/main.py
 
-# 1. Событие запуска плагина
+# 1. Plugin startup event
 def on_load(ctx):
-    ctx.log("Плагин запущен! 🚀")
+ctx.log("Plugin started! 🚀")
 
-# 2. Событие подключения к VPN
+# 2. VPN connection event
 def on_connect(ctx, payload):
-    # payload содержит {'config': {...}}
-    server = payload.get('config', {}).get('outbounds', [{}])[0].get('server', 'Unknown')
-    ctx.log(f"Подключились к: {server}")
-    
-    # Если есть право 'notify:ui', можно показать уведомление
-    ctx.notify(f"Успешно подключено к {server}")
+# payload contains {'config': {...}}
+server = payload.get('config', {}).get('outbounds', [{}])[0].get('server', 'Unknown')
+ctx.log(f"Connected to: {server}")
 
-# 3. Событие отключения
+# If the 'notify:ui' permission is present, a notification can be shown
+ctx.notify(f"Successfully connected to {server}")
+
+# 3. Disconnect event
 def on_disconnect(ctx, payload):
-    ctx.log("Соединение разорвано.")
+ctx.log("Connection terminated.")
 
-# 4. Чтение логов в реальном времени
+# 4. Reading logs in real time
 def on_log(ctx, payload):
-    line = payload.get('line', '')
-    # Можно фильтровать логи (например, искать ошибки)
-    if "error" in line.lower():
-        ctx.log(f"[Плагин] Обнаружена ошибка в логе: {line}")
+line = payload.get('line', '')
+# You can filter logs (e.g., look for errors)
+if "error" in line.lower():
+ctx.log(f"[Plugin] Error detected in log: {line}")
 
-# 5. Событие закрытия плагина
+# 5. Plugin close event
 def on_unload(ctx):
-    ctx.log("Плагин выгружается. Пока!")
+ctx.log("Plugin is unloading. Bye!")
 ```
 
-## 🛠 API Плагина (Объект `ctx`)
+## 🛠 Plugin API (`ctx` Object)
 
-| Метод | Описание | Пример |
+| Method | Description | Example |
 | :--- | :--- | :--- |
-| `ctx.log(msg)` | Пишет в лог приложения с префиксом плагина | `ctx.log("Привет")` |
-| `ctx.notify(msg)` | Показывает всплывающее окно (требует права) | `ctx.notify("Успех!")` |
-| `ctx.get_config()` | *(В разработке)* Получает текущий конфиг | `conf = ctx.get_config()` |
+| `ctx.log(msg)` | Writes to the application log with the plugin prefix | `ctx.log("Hello")` |
+| `ctx.notify(msg)` | Shows a popup window (requires permissions) | `ctx.notify("Success!")` |
+| `ctx.get_config()` | *(Under development)* Gets the current configuration | `conf = ctx.get_config()` |
 
-## 📦 Как установить?
+## 📦 How to install?
 
-1.  Запакуй папку плагина в **ZIP-архив** (корень архива должен содержать `plugin.json`).
-2.  В приложении нажми **Плагины** -> **Импорт из ZIP**.
-3.  Выбери файл. Приложение проверит безопасность и запустит плагин.
+1. Pack the plugin folder into a **ZIP archive** (the root of the archive must contain `plugin.json`).
+2. In the app, click **Plugins** -> **Import from ZIP**.
+3. Select the file. The app will check for security and launch the plugin.
 
 ---
-*Разработано для Twi2wi_Re. Несанкционированный доступ к системе через плагины невозможен.*
+*Developed for Twi2wi_Re. Unauthorized access to the system through plugins is impossible.*

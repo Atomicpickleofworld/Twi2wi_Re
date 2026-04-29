@@ -33,7 +33,6 @@ class ConfigCard(QWidget):
         h.addWidget(btn)
         h.setContentsMargins(0, 0, 0, 0)
 
-    # 🔧 Фикс: клик по карточке выбирает элемент в списке
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             parent_list = self.parent()

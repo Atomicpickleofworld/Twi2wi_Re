@@ -1,0 +1,10 @@
+{
+  "id": "demo_logger",
+  "name": "📋 Demo Logger",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "permissions": [
+    "hooks:read",
+    "notify:ui"
+  ]
+}

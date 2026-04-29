@@ -140,14 +140,12 @@ def _wrap_singbox(tag: str, outbound: dict) -> dict:
     return {
         "log": {"level": "info"},
         "inbounds": [
-            # 🔹 Локальный прокси (для приложений)
             {
                 "type": "mixed",
                 "tag": "mixed-in",
                 "listen": "127.0.0.1",
                 "listen_port": 2080
             },
-            # 🔹 TUN-адаптер (системный VPN) — ГЛАВНОЕ!
             {
                 "type": "tun",
                 "tag": "tun-in",

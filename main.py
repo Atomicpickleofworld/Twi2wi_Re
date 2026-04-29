@@ -14,7 +14,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
-    app.setApplicationVersion(__version__)  
+    app.setApplicationVersion(__version__)
 
     win = VPNManager()
     win.show()
