@@ -215,13 +215,15 @@ class VPNManager(QMainWindow):
 
         sl.addStretch()
 
-        self.connect_btn = QPushButton("▶  ПОДКЛЮЧИТЬ")
-        self.connect_btn.setObjectName("connect_btn")
-        self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.connect_btn.clicked.connect(self.toggle_connection)
-        sl.addSpacing(16)
-        sl.addWidget(self.connect_btn)
-        sl.addSpacing(16)
+        # self.connect_btn = QPushButton("▶  ПОДКЛЮЧИТЬ")
+        # self.connect_btn.setObjectName("connect_btn")
+        # self.connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # self.connect_btn.clicked.connect(self.toggle_connection)
+        # sl.addSpacing(16)
+        # sl.addWidget(self.connect_btn)
+        # sl.addSpacing(16)
+
+        #nah ts bullsh*t
 
         return sidebar
 
