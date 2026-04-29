@@ -14,6 +14,7 @@
 ## 📋 About
 
 **Twi2wi_Re** is a lightweight GUI client for managing VPN connections on Windows, designed with simplicity and performance in mind. It supports modern protocols: **AmneziaWG** (WireGuard fork with DPI resistance) and **sing-box**.
+<img src="assets/screen1.png" alt="screen 1"/>
 
 ### ✨ Features
 
