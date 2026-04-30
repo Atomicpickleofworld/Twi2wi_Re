@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.log
+vpn_debug.log
+vpn_runtime.log
+configs/
+configs.json
+ui_config.json
+dist/
+build/
+*.spec
