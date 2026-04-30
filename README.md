@@ -5,9 +5,7 @@
 > Modular, secure, and beautiful. Now with plugin sandbox, ping monitor, and adaptive UI.
 
 <p align="center">
-  <img src="assets/connect.png" alt="Connect" width="45%">
-  <img src="assets/ping.png" alt="Ping" width="45%">
-</p>
+  <img src="assets/Banner512.png" alt="Banner" width="100%">
 
 ---
 
