@@ -1,0 +1,16 @@
+{
+  "language": "ru",
+  "ping_hosts": {
+    "GOOGLE DNS": "8.8.8.8",
+    "CLOUDFLARE": "1.1.1.1",
+    "YANDEX DNS": "77.88.8.8",
+    "STRINOVA JP": "101.32.143.247"
+  },
+  "ping_order": [
+    "YANDEX DNS",
+    "GOOGLE DNS",
+    "CLOUDFLARE",
+    "STRINOVA JP"
+  ],
+  "ping_favorites": []
+}

@@ -79,4 +79,30 @@ QFrame#plugin_card:hover {
     color: #F57C00;
     background: rgba(255, 193, 7, 0.15);
 }
+
+#lang_label {
+    color: #7A5C9A;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+#lang_combo {
+    background: #FFFFFF;
+    border: 1px solid #D8C8E8;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #2C2430;
+    font-size: 11px;
+    min-width: 120px;
+}
+#lang_combo:hover { border-color: #FF9E43; }
+#lang_combo:focus { border-color: #FF9E43; outline: none; }
+#lang_combo::drop-down { border: none; width: 20px; }
+#lang_combo::down-arrow { image: none; }
+#lang_combo QAbstractItemView {
+    background: #FFFFFF;
+    border: 1px solid #D8C8E8;
+    selection-background-color: #E6D8FF;
+    selection-color: #2C2430;
+}
 """

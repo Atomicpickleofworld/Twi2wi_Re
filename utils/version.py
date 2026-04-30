@@ -4,13 +4,22 @@
 Формат: МАЖОР.МИНОР.ПАТЧ (например, 1.4.0)
 """
 
-__version__ = "2.0.1"
-__version_info__ = (2, 0, 1)
-
+__version__ = "3.1.0"
+__version_info__ = (3, 1, 0)
+__server_name__ = "Twi2wi_Re_SingleInstance_Mutex"
 
 __app_name__ = "Twi2wi_Re"
 __author__ = "Atomicpickleofworld"
 __github__ = "https://github.com/Atomicpickleofworld/Twi2wi_Re"
+
+
+__dir_bin__ = "bin"
+__dir_configs__ = "configs"
+__dir_plugins__ = "plugins"
+__dir_assets__ = "assets"
+__dir_security__ = "security"
+__dir_ui__ = "ui"
+__dir_utils__ = "utils"
 
 def get_version() -> str:
     """Возвращает версию как строку."""

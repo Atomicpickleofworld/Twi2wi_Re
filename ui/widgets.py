@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu
 from PyQt6.QtCore import Qt
+from utils.i18n import tr
 
 
 class ConfigCard(QWidget):
@@ -11,14 +12,14 @@ class ConfigCard(QWidget):
 
         name = QLabel(cfg.get("name", "Без имени"))
         name.setObjectName("card_title")
-        typ = QLabel(cfg.get("type", "").upper())
+        typ = QLabel(cfg.get("type", " ").upper())
         typ.setObjectName("card_host")
 
         btn = QPushButton("⋮")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(24, 24)
         btn.setStyleSheet("border:none; background:transparent; font-size:16px; color: #7A5C9A;")
-        btn.setToolTip("Меню")
+        btn.setToolTip(tr("widget_menu_tooltip"))
         btn.clicked.connect(self.show_menu)
 
         left = QVBoxLayout()
@@ -45,8 +46,32 @@ class ConfigCard(QWidget):
 
     def show_menu(self):
         menu = QMenu(self)
-        rename = menu.addAction("✏️ Переименовать")
-        delete = menu.addAction("🗑️ Удалить")
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #FFFFFF;
+                border: 1px solid #D8C8E8;
+                border-radius: 6px;
+                padding: 4px 0;
+            }
+            QMenu::item {
+                color: #2C2430;
+                padding: 8px 20px;
+                margin: 0 4px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #E6D8FF;
+                color: #2C2430;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #D8C8E8;
+                margin: 4px 0;
+            }
+        """)
+
+        rename = menu.addAction(tr("config_rename"))
+        delete = menu.addAction(tr("config_delete"))
         act = menu.exec(self.mapToGlobal(self.rect().bottomRight()))
         top = self.window()
         if act == rename and hasattr(top, "rename_config_by_obj"):
