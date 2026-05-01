@@ -1,6 +1,6 @@
 
 # Twi2wi_Re
-<img src="assets/Logo512.png" alt="Logo"> 
+<img src="assets/Logo128.png" alt="Logo"> 
 
 > Lightweight Windows VPN client with AmneziaWG and sing-box support.
 > Modular, secure, and beautiful. Now with plugin sandbox, ping monitor, and adaptive UI.
