@@ -1,0 +1,15 @@
+{
+  "id": "test_tab_style",
+  "name": " Тестовая вкладка",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "description": "Тестовая вкладка с автономными стилями и счётчиками событий",
+  "permissions": [
+    "hooks:read",
+    "ui:tab"
+  ],
+  "tab": {
+    "title": "Тестовая вкладка",
+    "icon": "🧪"
+  }
+}

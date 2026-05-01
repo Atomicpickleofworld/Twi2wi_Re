@@ -45,7 +45,6 @@ def _safe_import(name, *args, **kwargs):
 
 
 def _install_import_hook():
-    """Подменяем __import__ на безопасную версию."""
     import builtins
     builtins.__import__ = _safe_import
 
@@ -56,7 +55,6 @@ _allowed_root: Path | None = None
 
 
 def _safe_open(file, mode="r", *args, **kwargs):
-    """Разрешаем open() только внутри папки плагина."""
     try:
         target = Path(file).resolve()
     except Exception:
@@ -93,6 +91,37 @@ def _load_plugin(plugin_dir: Path, entry: str) -> types.ModuleType:
     return module
 
 
+# ── CSS-валидатор (внутри runner, без импорта ui) ────────────────────────────
+
+_CSS_MAX_BYTES = 8 * 1024  # 8 KB
+
+# Запрещённые CSS-паттерны (безопасность)
+_CSS_BLOCKED_PATTERNS = [
+    "url(",         # внешние ресурсы
+    "qproperty-",   # Qt-специфичные свойства которые могут навредить
+    "image:",
+    "@import",
+    "javascript:",
+    "-qt-",
+]
+
+
+def _validate_css(css: str) -> str:
+    """
+    Минимальная проверка CSS от плагина.
+    Возвращает очищенный CSS или бросает ValueError.
+    """
+    if not isinstance(css, str):
+        raise ValueError("CSS должен быть строкой")
+    if len(css.encode("utf-8")) > _CSS_MAX_BYTES:
+        raise ValueError(f"CSS превышает лимит {_CSS_MAX_BYTES // 1024} KB")
+    low = css.lower()
+    for pattern in _CSS_BLOCKED_PATTERNS:
+        if pattern in low:
+            raise ValueError(f"CSS содержит запрещённый паттерн: '{pattern}'")
+    return css.strip()
+
+
 # ── Контекст который передаётся плагину вместо прямого доступа ──────────────
 
 class PluginContext:
@@ -104,12 +133,17 @@ class PluginContext:
         self._permissions = permissions
         self._log_buffer: list[str] = []
         self._notifications: list[str] = []
+        self._style_patch: str | None = None
+        self._tab_info: dict | None = None
+        self._tab_html: str | None = None
+
+    # ── Базовые методы ───────────────────────────────────────────────────────
 
     def log(self, message: str):
-        """Плагин может писать в свой лог (не в основной)."""
+        """Плагин может писать в свой лог."""
         if not isinstance(message, str):
             return
-        self._log_buffer.append(str(message)[:500])  # ограничение длины
+        self._log_buffer.append(str(message)[:500])
 
     def notify(self, message: str):
         """Отправить уведомление в UI (если есть право notify:ui)."""
@@ -119,21 +153,102 @@ class PluginContext:
             return
         self._notifications.append(str(message)[:200])
 
+    # ── UI: стили ────────────────────────────────────────────────────────────
+
+    def set_style(self, css: str):
+        """
+        Передать CSS-патч для применения к приложению.
+        Требует право ui:style.
+
+        Пример:
+            def on_get_style(ctx, payload):
+                ctx.set_style(\"\"\"
+                    #sidebar { background: #1a1a2e; }
+                    #nav_btn { color: #e94560; }
+                \"\"\")
+        """
+        if "ui:style" not in self._permissions:
+            raise PermissionError("[sandbox] Нет права ui:style")
+        self._style_patch = _validate_css(css)
+
+    def clear_style(self):
+        """Убрать CSS-патч (вернуть дефолтные стили)."""
+        if "ui:style" not in self._permissions:
+            raise PermissionError("[sandbox] Нет права ui:style")
+        self._style_patch = ""   # пустая строка = сбросить патч
+
+    # ── UI: вкладка ──────────────────────────────────────────────────────────
+
+    def register_tab(self, title: str, icon: str = "🔌", html: str = ""):
+        """
+        Зарегистрировать вкладку в сайдбаре.
+        Требует право ui:tab.
+
+        Параметры:
+            title  — название кнопки в сайдбаре (до 30 символов)
+            icon   — эмодзи иконка (опционально)
+            html   — HTML-контент для вкладки (до 32 KB)
+
+        Пример:
+            def on_build_tab(ctx, payload):
+                ctx.register_tab(
+                    title="Статистика",
+                    icon="📊",
+                    html="<h2>Всё хорошо</h2><p>Подключений: 42</p>"
+                )
+        """
+        if "ui:tab" not in self._permissions:
+            raise PermissionError("[sandbox] Нет права ui:tab")
+
+        title = str(title)[:30].strip()
+        icon  = str(icon)[:8].strip()
+
+        if not title:
+            raise ValueError("Название вкладки не может быть пустым")
+
+        if not isinstance(html, str):
+            raise ValueError("html должен быть строкой")
+        if len(html.encode("utf-8")) > 32 * 1024:
+            raise ValueError("HTML вкладки превышает лимит 32 KB")
+
+        # Базовая защита от XSS в HTML
+        _BLOCKED_HTML = ["<script", "javascript:", "onerror=", "onload=", "<iframe"]
+        low = html.lower()
+        for blocked in _BLOCKED_HTML:
+            if blocked in low:
+                raise ValueError(f"HTML содержит запрещённый элемент: '{blocked}'")
+
+        self._tab_info = {"title": title, "icon": icon}
+        self._tab_html = html
+
+    # ── Внутренний метод сборки ответа ───────────────────────────────────────
+
     def flush(self) -> dict:
         """Собрать все накопленные ответы для отправки в основной процесс."""
-        result = {
-            "logs": self._log_buffer[:],
+        result: dict = {
+            "logs":          self._log_buffer[:],
             "notifications": self._notifications[:],
         }
+
+        if self._style_patch is not None:
+            result["style_patch"] = self._style_patch
+
+        if self._tab_info is not None:
+            result["tab_info"] = self._tab_info
+            result["tab_html"] = self._tab_html or ""
+
         self._log_buffer.clear()
         self._notifications.clear()
+        self._style_patch = None
+        self._tab_info    = None
+        self._tab_html    = None
+
         return result
 
 
 # ── Главный цикл ─────────────────────────────────────────────────────────────
 
 def _send(data: dict):
-    """Отправить JSON-ответ в основной процесс через stdout."""
     print(json.dumps(data, ensure_ascii=False), flush=True)
 
 
@@ -141,7 +256,6 @@ def _run(plugin_dir: Path, permissions: set[str], entry: str):
     _install_import_hook()
     _install_fs_hook(plugin_dir)
 
-    # Загружаем модуль плагина
     try:
         module = _load_plugin(plugin_dir, entry)
     except Exception as e:
@@ -149,11 +263,8 @@ def _run(plugin_dir: Path, permissions: set[str], entry: str):
         return
 
     ctx = PluginContext(permissions)
-
-    # Сигнал «готов»
     _send({"type": "ready"})
 
-    # Основной цикл: читаем события из stdin
     for raw_line in sys.stdin:
         raw_line = raw_line.strip()
         if not raw_line:
@@ -168,17 +279,13 @@ def _run(plugin_dir: Path, permissions: set[str], entry: str):
         hook_name = event.get("hook", "")
         payload   = event.get("payload", {})
 
-        # Проверяем что хук разрешён
         if hook_name not in permissions and f"hook:{hook_name}" not in permissions:
-            # hooks:read разрешает все хуки из whitelist
             if "hooks:read" not in permissions:
                 _send({"type": "error", "message": f"Хук '{hook_name}' не разрешён"})
                 continue
 
-        # Вызываем обработчик плагина если он есть
         handler = getattr(module, hook_name, None)
         if handler is None:
-            # Плагин просто не реализует этот хук — OK
             _send({"type": "ok", "hook": hook_name, **ctx.flush()})
             continue
 

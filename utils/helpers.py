@@ -85,3 +85,78 @@ def get_system_info():
         info.append(tr("sys_ram_label") + " N/A")
 
     return "\n".join(info)
+
+def extract_config_info(config: dict) -> dict:
+    """
+    Извлекает из конфига (JSON sing-box или raw-конфиг AmneziaWG/WireGuard)
+    сервер, порт, метод шифрования.
+    Возвращает словарь: {host, port, method}
+    """
+    content = config.get("content", "")
+    result = {"host": None, "port": None, "method": None}
+
+    # 1. Пробуем распарсить как AmneziaWG / WireGuard (raw конфиг)
+    if "[Interface]" in content:
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith("Endpoint"):
+                # Endpoint = domain:port или ip:port
+                endpoint = line.split("=", 1)[1].strip()
+                if ":" in endpoint:
+                    host, port_str = endpoint.rsplit(":", 1)
+                    result["host"] = host
+                    try:
+                        result["port"] = int(port_str)
+                    except:
+                        pass
+                else:
+                    result["host"] = endpoint
+            elif line.startswith("Jc") or line.startswith("Jmin") or line.startswith("Jmax"):
+                result["method"] = "AmneziaWG"
+            elif line.startswith("PrivateKey"):
+                if not result["method"]:
+                    result["method"] = "WireGuard"
+        if result["host"]:
+            return result
+
+    # 2. Если не AmneziaWG, пробуем как JSON sing-box
+    try:
+        import json
+        if isinstance(content, str):
+            raw = content.strip()
+            if raw.startswith(("{", "[")):
+                cfg = json.loads(raw)
+            else:
+                # Возможно, это ссылка, но мы уже должны были распарсить её при добавлении
+                return result
+        else:
+            cfg = content
+
+        outbounds = cfg.get("outbounds", [])
+        proxy = None
+        for ob in outbounds:
+            ob_type = ob.get("type", "")
+            if ob_type in ("vmess", "vless", "trojan", "shadowsocks", "socks", "http", "hysteria2", "tuic",
+                           "wireguard", "amneziawg"):
+                proxy = ob
+                result["method"] = ob_type.upper()
+                break
+        if not proxy:
+            return result
+
+        result["host"] = proxy.get("server")
+        result["port"] = proxy.get("server_port")
+
+        # Уточняем метод шифрования для некоторых типов
+        if proxy.get("type") == "shadowsocks":
+            result["method"] = proxy.get("method", "chacha20-ietf-poly1305").upper()
+        elif proxy.get("type") == "vmess":
+            result["method"] = f"VMess {proxy.get('security', 'auto')}"
+        elif proxy.get("type") == "vless":
+            result["method"] = "VLESS" + (f" + {proxy.get('flow','')}" if proxy.get('flow') else "")
+        elif proxy.get("type") == "amneziawg":
+            result["method"] = "AmneziaWG"
+    except Exception:
+        pass
+
+    return result

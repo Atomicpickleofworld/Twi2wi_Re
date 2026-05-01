@@ -56,6 +56,7 @@ class ConfigsController:
             win.configs = []
         for c in win.configs:
             c.setdefault("favorite", False)
+            c.setdefault("fav_order", 0)
 
     def save_configs(self):
         win = self.win

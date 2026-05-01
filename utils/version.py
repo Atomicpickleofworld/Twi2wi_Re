@@ -4,8 +4,8 @@
 Формат: МАЖОР.МИНОР.ПАТЧ (например, 1.4.0)
 """
 
-__version__ = "3.1.0"
-__version_info__ = (3, 1, 0)
+__version__ = "3.2.0"
+__version_info__ = (3, 2, 0)
 __server_name__ = "Twi2wi_Re_SingleInstance_Mutex"
 
 __app_name__ = "Twi2wi_Re"

@@ -2,13 +2,9 @@
 """
 Менеджер песочницы плагинов.
 
-Использование в VPNManager:
-    from security.sandbox import PluginSandbox
-
-    sandbox = PluginSandbox(plugin_dir=Path("plugins/my_plugin"))
-    sandbox.load()                          # запускает subprocess
-    sandbox.trigger("on_connect", {...})    # посылает событие
-    sandbox.unload()                        # останавливает процесс
+Новые коллбэки:
+    on_register_tab(plugin_id, title, icon, html)  — плагин хочет вкладку
+    on_style_patch(plugin_id, css)                 — плагин применяет CSS-патч
 """
 
 from __future__ import annotations
@@ -26,6 +22,8 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
+from PyQt6.QtWidgets import QApplication
+
 from security.permissions import PluginPermissions, validate_manifest
 
 logger = logging.getLogger(__name__)
@@ -38,11 +36,6 @@ class PluginLoadError(Exception):
 
 
 def install_plugin_from_zip(zip_path: Path, plugins_root: Path) -> Path:
-    """
-    Распаковывает ZIP-плагин в plugins_root/<plugin_id>/.
-    Проверяет структуру и манифест перед распаковкой.
-    Возвращает Path к папке плагина.
-    """
     plugins_root.mkdir(parents=True, exist_ok=True)
 
     if not zipfile.is_zipfile(zip_path):
@@ -51,14 +44,10 @@ def install_plugin_from_zip(zip_path: Path, plugins_root: Path) -> Path:
     with zipfile.ZipFile(zip_path, "r") as zf:
         names = zf.namelist()
 
-        # ── Защита от zip-slip ───────────────────────────────────────────────
         for name in names:
             if ".." in name or name.startswith("/") or name.startswith("\\"):
-                raise PluginLoadError(
-                    f"Архив содержит опасный путь: '{name}' (zip-slip атака)."
-                )
+                raise PluginLoadError(f"Архив содержит опасный путь: '{name}' (zip-slip атака).")
 
-        # ── Проверяем наличие манифеста ──────────────────────────────────────
         if "plugin.json" not in names:
             raise PluginLoadError("Архив не содержит plugin.json в корне.")
 
@@ -75,13 +64,9 @@ def install_plugin_from_zip(zip_path: Path, plugins_root: Path) -> Path:
         plugin_id = manifest["id"]
         entry     = manifest["entry"]
 
-        # ── Проверяем что entry-файл есть в архиве ──────────────────────────
         if entry not in names:
-            raise PluginLoadError(
-                f"Файл точки входа '{entry}' не найден в архиве."
-            )
+            raise PluginLoadError(f"Файл точки входа '{entry}' не найден в архиве.")
 
-        # ── Whitelist расширений файлов в архиве ─────────────────────────────
         allowed_extensions = {".py", ".json", ".txt", ".md", ".png", ".svg"}
         for name in names:
             suffix = Path(name).suffix.lower()
@@ -91,12 +76,10 @@ def install_plugin_from_zip(zip_path: Path, plugins_root: Path) -> Path:
                     f"Разрешены: {', '.join(sorted(allowed_extensions))}"
                 )
 
-        # ── Распаковываем ────────────────────────────────────────────────────
         target_dir = plugins_root / plugin_id
         if target_dir.exists():
-            shutil.rmtree(target_dir)  # обновление плагина
+            shutil.rmtree(target_dir)
         target_dir.mkdir(parents=True)
-
         zf.extractall(target_dir)
 
     logger.info(f"Плагин '{plugin_id}' установлен в {target_dir}")
@@ -104,7 +87,6 @@ def install_plugin_from_zip(zip_path: Path, plugins_root: Path) -> Path:
 
 
 def compute_file_hash(path: Path) -> str:
-    """SHA-256 файла для проверки целостности."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -112,25 +94,26 @@ def compute_file_hash(path: Path) -> str:
     return h.hexdigest()
 
 
-# ── Сам класс песочницы ──────────────────────────────────────────────────────
+# ── Класс песочницы ──────────────────────────────────────────────────────────
 
 class PluginSandbox:
-    """
-    Управляет одним плагином в отдельном subprocess.
-
-    События передаются через stdin/stdout в формате JSON.
-    Плагин не имеет доступа к основному процессу.
-    """
+    """Управляет одним плагином в отдельном subprocess."""
 
     def __init__(
         self,
         plugin_dir: Path,
         on_log: Callable[[str], None] | None = None,
         on_notify: Callable[[str], None] | None = None,
+        on_register_tab: Callable[[str, str, str, str], None] | None = None,
+        on_style_patch: Callable[[str, str], None] | None = None,
     ):
         self.plugin_dir = plugin_dir.resolve()
         self.on_log = on_log or (lambda msg: logger.info(f"[plugin] {msg}"))
         self.on_notify = on_notify or (lambda msg: None)
+        # on_register_tab(plugin_id, title, icon, html)
+        self.on_register_tab = on_register_tab or (lambda *a: None)
+        # on_style_patch(plugin_id, css)
+        self.on_style_patch = on_style_patch or (lambda *a: None)
 
         self._process: subprocess.Popen | None = None
         self._reader_thread: threading.Thread | None = None
@@ -141,14 +124,11 @@ class PluginSandbox:
         self._entry: str = "main.py"
         self._ready = False
         self._lock = threading.Lock()
-
-        # Хеши файлов при загрузке — для проверки подмены
         self._file_hashes: dict[str, str] = {}
 
     # ── Загрузка ─────────────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Читает манифест, запускает subprocess плагина."""
         manifest_path = self.plugin_dir / "plugin.json"
         if not manifest_path.exists():
             raise PluginLoadError(f"plugin.json не найден в {self.plugin_dir}")
@@ -170,7 +150,6 @@ class PluginSandbox:
                 f"отклонённые права: {self.permissions.denied}"
             )
 
-        # Снимаем хеши всех .py файлов
         for py_file in self.plugin_dir.glob("*.py"):
             self._file_hashes[py_file.name] = compute_file_hash(py_file)
 
@@ -178,7 +157,6 @@ class PluginSandbox:
 
     def _start_process(self) -> None:
         permissions_json = json.dumps(list(self.permissions.granted))
-
         runner = Path(__file__).parent / "plugin_runner.py"
 
         self._process = subprocess.Popen(
@@ -198,7 +176,8 @@ class PluginSandbox:
 
         # Поток чтения ответов
         self._reader_thread = threading.Thread(
-            target=self._read_loop, daemon=True, name=f"plugin-reader-{self.manifest.get('id','?')}"
+            target=self._read_loop, daemon=True,
+            name=f"plugin-reader-{self.manifest.get('id', '?')}"
         )
         self._reader_thread.start()
 
@@ -213,22 +192,16 @@ class PluginSandbox:
         except queue.Empty:
             self.unload()
             raise PluginLoadError(
-                f"Плагин '{self.manifest.get('id','?')}' не ответил за 5 секунд."
+                f"Плагин '{self.manifest.get('id', '?')}' не ответил за 5 секунд."
             )
 
     # ── Отправка события ─────────────────────────────────────────────────────
 
     def trigger(self, hook: str, payload: dict | None = None) -> dict | None:
-        """
-        Отправить событие в плагин.
-        Возвращает ответ или None если плагин не запущен / нет права.
-        """
         if not self._ready or not self._process:
             return None
         if not self.permissions.can_use_hook(hook):
             return None
-
-        # ── Проверяем что файлы плагина не подменили ─────────────────────────
         if not self._verify_integrity():
             logger.error(
                 f"[sandbox] Плагин '{self.manifest['id']}': "
@@ -248,7 +221,6 @@ class PluginSandbox:
                 self._ready = False
                 return None
 
-        # Ждём ответ до 3 секунд
         try:
             resp = self._response_queue.get(timeout=3)
         except queue.Empty:
@@ -257,12 +229,30 @@ class PluginSandbox:
             )
             return None
 
-        # Обрабатываем логи и уведомления из плагина
+        # ── Обрабатываем стандартные коллбэки ────────────────────────────────
         for log_line in resp.get("logs", []):
             self.on_log(f"[{self.manifest['id']}] {log_line}")
 
         for note in resp.get("notifications", []):
             self.on_notify(note)
+
+        # ── Новые UI-коллбэки ─────────────────────────────────────────────────
+
+        # CSS-патч от плагина
+        if "style_patch" in resp and self.permissions.can_patch_style():
+            css = resp["style_patch"]
+            self.on_style_patch(self.plugin_id, css)
+
+        # Регистрация вкладки
+        if "tab_info" in resp and self.permissions.can_register_tab():
+            tab_info = resp["tab_info"]
+            tab_html = resp.get("tab_html", "")
+            self.on_register_tab(
+                self.plugin_id,
+                tab_info.get("title", self.plugin_name),
+                tab_info.get("icon", "🔌"),
+                tab_html,
+            )
 
         if resp.get("type") == "plugin_error":
             logger.warning(
@@ -275,7 +265,6 @@ class PluginSandbox:
     # ── Проверка целостности ──────────────────────────────────────────────────
 
     def _verify_integrity(self) -> bool:
-        """Проверяет что .py файлы плагина не изменились с момента загрузки."""
         for filename, original_hash in self._file_hashes.items():
             current_path = self.plugin_dir / filename
             if not current_path.exists():
@@ -293,7 +282,6 @@ class PluginSandbox:
     # ── Остановка ────────────────────────────────────────────────────────────
 
     def unload(self) -> None:
-        """Останавливает subprocess плагина."""
         self._ready = False
         if self._process:
             try:
@@ -307,10 +295,7 @@ class PluginSandbox:
             self._process = None
         logger.info(f"Плагин '{self.manifest.get('id', '?')}' выгружен.")
 
-    # ── Чтение ответов из subprocess ─────────────────────────────────────────
-
     def _read_loop(self) -> None:
-        """Фоновый поток: читает JSON-строки из stdout плагина."""
         try:
             for line in self._process.stdout:
                 line = line.strip()
@@ -323,8 +308,6 @@ class PluginSandbox:
                     logger.warning(f"[sandbox] Мусор из плагина: {line[:100]}")
         except Exception:
             pass
-
-    # ── Свойства ─────────────────────────────────────────────────────────────
 
     @property
     def is_running(self) -> bool:
@@ -344,7 +327,10 @@ class PluginSandbox:
 class SandboxManager:
     """
     Держит все активные песочницы.
-    Заменяет старый PluginManager из utils/plugin_manager.py.
+
+    Новые коллбэки:
+        on_register_tab(plugin_id, title, icon, html)
+        on_style_patch(plugin_id, css)
     """
 
     def __init__(
@@ -352,36 +338,82 @@ class SandboxManager:
         plugins_root: Path,
         on_log: Callable[[str], None] | None = None,
         on_notify: Callable[[str], None] | None = None,
+        on_register_tab: Callable[[str, str, str, str], None] | None = None,
+        on_style_patch: Callable[[str, str], None] | None = None,
     ):
         self._last_trigger: dict[str, float] = {}
         self.plugins_root = plugins_root
         self.on_log = on_log
         self.on_notify = on_notify
+        self.on_register_tab = on_register_tab or (lambda *a: None)
+        self.on_style_patch  = on_style_patch  or (lambda *a: None)
         self._sandboxes: dict[str, PluginSandbox] = {}
 
         self._throttle = {
-            "on_ping_result": 5.0,  # не чаще раз в 5 сек
-            "on_log":         1.0,  # не чаще раз в 1 сек
+            "on_ping_result": 5.0,
+            "on_log":         1.0,
         }
 
-    def load_all(self) -> None:
-        """Загружает все плагины из plugins_root."""
+    def load_all(self, saved_state: dict[str, bool] | None = None) -> None:
+        """Загружает все плагины, пропуская UI-хуки для выключенных."""
         if not self.plugins_root.exists():
             return
+        saved_state = saved_state or {}
         for plugin_dir in self.plugins_root.iterdir():
             if plugin_dir.is_dir() and (plugin_dir / "plugin.json").exists():
-                self._load_one(plugin_dir)
+                plugin_id = self._load_one(plugin_dir)
+                if plugin_id:
+                    if saved_state.get(plugin_id, True):
+                        # Плагин включён — активируем UI-хуки
+                        self.activate(plugin_id)
+                    else:
+                        # Плагин выключен — сразу выгружаем
+                        self.unload(plugin_id)
 
     def install_from_zip(self, zip_path: Path) -> str:
-        """Устанавливает плагин из ZIP и сразу загружает. Возвращает plugin_id."""
         plugin_dir = install_plugin_from_zip(zip_path, self.plugins_root)
         return self._load_one(plugin_dir)
+
+    def list_all_plugins(self) -> list[dict]:
+        """Возвращает ВСЕ плагины (и активные, и выключенные)."""
+        plugins = []
+        if not self.plugins_root.exists():
+            return plugins
+
+        for plugin_dir in self.plugins_root.iterdir():
+            if not plugin_dir.is_dir():
+                continue
+            manifest_path = plugin_dir / "plugin.json"
+            if not manifest_path.exists():
+                continue
+
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            plugin_id = manifest.get("id", plugin_dir.name)
+            sandbox = self._sandboxes.get(plugin_id)
+            is_running = sandbox is not None
+
+            plugins.append({
+                "id": plugin_id,
+                "name": manifest.get("name", plugin_id),
+                "running": is_running,
+                "permissions": manifest.get("permissions", []),
+                "version": manifest.get("version", "?"),
+                "description": manifest.get("description", ""),
+            })
+
+        return plugins
 
     def _load_one(self, plugin_dir: Path) -> str:
         sandbox = PluginSandbox(
             plugin_dir=plugin_dir,
             on_log=self.on_log,
             on_notify=self.on_notify,
+            on_register_tab=self.on_register_tab,
+            on_style_patch=self.on_style_patch,
         )
         try:
             sandbox.load()
@@ -391,13 +423,48 @@ class SandboxManager:
             logger.error(f"Не удалось загрузить плагин из {plugin_dir}: {e}")
             return ""
 
+    def activate(self, plugin_id: str) -> None:
+        """Включает плагин и триггерит UI-хуки."""
+        if plugin_id not in self._sandboxes:
+            return
+        sandbox = self._sandboxes[plugin_id]
+
+        # СНАЧАЛА вкладка
+        if sandbox.permissions.can_register_tab():
+            resp = sandbox.trigger("on_build_tab", {})
+            # print(f"[DEBUG] on_build_tab resp: {resp}")
+            if resp and self.on_register_tab:
+                tab_info = resp.get("tab_info")
+                tab_html = resp.get("tab_html", "")
+                # print(f"[DEBUG] tab_info={tab_info}, html_len={len(tab_html)}")
+                if tab_info:
+                    self.on_register_tab(
+                        plugin_id,
+                        tab_info.get("title", sandbox.plugin_name),
+                        tab_info.get("icon", "🔌"),
+                        tab_html,
+                    )
+                    # print(f"[DEBUG] on_register_tab CALLED")
+
+        # ПОТОМ стиль
+        if sandbox.permissions.can_patch_style():
+            resp = sandbox.trigger("on_get_style", {})
+            if resp:
+                style_patch = resp.get("style_patch")
+                if style_patch is not None and self.on_style_patch:
+                    self.on_style_patch(plugin_id, style_patch)
+                    # Принудительно перерисовываем окно после применения CSS
+                    import time
+                    time.sleep(0.05)  # маленькая пауза для обработки событий Qt
+                    QApplication.processEvents()
+
     def trigger_hook(self, hook: str, **payload) -> None:
         now = time.monotonic()
         min_interval = self._throttle.get(hook, 0)
         last = self._last_trigger.get(hook, 0)
 
         if now - last < min_interval:
-            return  # пропускаем — слишком часто
+            return
 
         self._last_trigger[hook] = now
 
@@ -423,9 +490,9 @@ class SandboxManager:
     def list_plugins(self) -> list[dict]:
         return [
             {
-                "id":      s.plugin_id,
-                "name":    s.plugin_name,
-                "running": s.is_running,
+                "id":          s.plugin_id,
+                "name":        s.plugin_name,
+                "running":     s.is_running,
                 "permissions": list(s.permissions.granted) if s.permissions else [],
             }
             for s in self._sandboxes.values()

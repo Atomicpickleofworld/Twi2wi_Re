@@ -11,21 +11,26 @@ from dataclasses import dataclass, field
 # ── Все хуки которые вообще существуют в системе ────────────────────────────
 
 ALLOWED_HOOKS: set[str] = {
-    "on_connect",       # VPN подключился   → payload: {"config": {...}}
-    "on_disconnect",    # VPN отключился    → payload: {}
-    "on_log",           # новая строка лога → payload: {"line": "..."}
-    "on_ping_result",   # результат пинга   → payload: {"name": "...", "ms": 0, "loss": 0.0}
-    "on_config_added",  # добавлен конфиг   → payload: {"name": "...", "type": "..."}
-    "on_config_removed",# удалён конфиг     → payload: {"name": "..."}
+    "on_connect",        # VPN подключился    → payload: {"config": {...}}
+    "on_disconnect",     # VPN отключился     → payload: {}
+    "on_log",            # новая строка лога  → payload: {"line": "..."}
+    "on_ping_result",    # результат пинга    → payload: {"name": "...", "ms": 0, "loss": 0.0}
+    "on_config_added",   # добавлен конфиг    → payload: {"name": "...", "type": "..."}
+    "on_config_removed", # удалён конфиг      → payload: {"name": "..."}
+    # ── UI-хуки (только для плагинов с правами ui:*) ─────────────────────────
+    "on_build_tab",      # плагин хочет создать вкладку  → payload: {}
+    "on_get_style",      # плагин отдаёт CSS-патч        → payload: {}
 }
 
 # ── Права которые плагин может запросить ─────────────────────────────────────
 
 KNOWN_PERMISSIONS: set[str] = {
-    "hooks:read",       # получать события (обязательное минимальное право)
-    "log:read",         # читать строки лога
-    "network:http",     # делать HTTP-запросы (через безопасный прокси-API)
-    "notify:ui",        # отправлять уведомление в UI (только текст)
+    "hooks:read",    # получать события (обязательное минимальное право)
+    "log:read",      # читать строки лога
+    "network:http",  # делать HTTP-запросы (через безопасный прокси-API)
+    "notify:ui",     # отправлять уведомление в UI (только текст)
+    "ui:tab",        # зарегистрировать собственную вкладку в сайдбаре
+    "ui:style",      # применить CSS-патч к стилям приложения
 }
 
 # Права без которых плагин не работает вообще
@@ -33,6 +38,9 @@ REQUIRED_PERMISSIONS: set[str] = {"hooks:read"}
 
 # Права которые разрешают сетевой доступ — требуют отдельного подтверждения
 NETWORK_PERMISSIONS: set[str] = {"network:http"}
+
+# Права которые влияют на UI — применяются только в основном потоке
+UI_PERMISSIONS: set[str] = {"ui:tab", "ui:style"}
 
 
 @dataclass
@@ -73,6 +81,12 @@ class PluginPermissions:
     def can_notify_ui(self) -> bool:
         return self.has("notify:ui")
 
+    def can_register_tab(self) -> bool:
+        return self.has("ui:tab")
+
+    def can_patch_style(self) -> bool:
+        return self.has("ui:style")
+
 
 def validate_manifest(manifest: dict) -> list[str]:
     """
@@ -103,8 +117,18 @@ def validate_manifest(manifest: dict) -> list[str]:
         entry = manifest["entry"]
         if not isinstance(entry, str) or not entry.endswith(".py"):
             errors.append(f"entry должен указывать на .py файл, получено: '{entry}'")
-        # Защита от path traversal
         if ".." in entry or "/" in entry or "\\" in entry:
             errors.append(f"entry не может содержать пути с '..' или слэшами: '{entry}'")
+
+    # ── Валидация секции tab (опционально) ───────────────────────────────────
+    if "tab" in manifest:
+        tab = manifest["tab"]
+        if not isinstance(tab, dict):
+            errors.append("Поле 'tab' должно быть объектом {title, icon}")
+        else:
+            if "title" not in tab:
+                errors.append("Поле 'tab' должно содержать 'title'")
+            if "ui:tab" not in manifest.get("permissions", []):
+                errors.append("Плагин объявляет 'tab', но не запросил право 'ui:tab'")
 
     return errors

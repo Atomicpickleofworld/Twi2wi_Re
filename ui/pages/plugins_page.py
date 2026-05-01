@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QFileDialog, QMenu,
 )
 
-from security.sandbox import PluginLoadError
+from security.sandbox import PluginLoadError, SandboxManager
 from utils.i18n import tr
 
 if TYPE_CHECKING:
@@ -35,17 +35,18 @@ class PluginsController:
 
     def render_plugins(self, filter_text: str = ""):
         win = self.win
-        # Синхронизируем plugins_data из sandbox_manager
+        # Используем list_all_plugins и ПРАВИЛЬНО мапим ключи
+        raw = win.sandbox_manager.list_all_plugins()
         win.plugins_data = [
             {
-                "id":      p["id"],
-                "name":    p["name"],
-                "desc":    f"Права: {', '.join(p['permissions'])}",
-                "ver":     win.sandbox_manager._sandboxes[p["id"]].manifest.get("version", "?"),
-                "enabled": p["running"],
-                "icon":    "🧩",
+                "id": p["id"],
+                "name": p["name"],
+                "desc": p.get("description", f"Права: {', '.join(p.get('permissions', []))}"),
+                "ver": p.get("version", "?"),  # ← version → ver
+                "enabled": p["running"],  # ← running → enabled
+                "icon": "🧩",
             }
-            for p in win.sandbox_manager.list_plugins()
+            for p in raw
         ]
         render_plugins(win, filter_text)
 
@@ -102,30 +103,34 @@ class PluginsController:
         win = self.win
         if event.type() == QEvent.Type.MouseButtonPress:
             if hasattr(obj, "plugin_ref") and obj.objectName() == "plugin_card":
-                plugin    = obj.plugin_ref
+                plugin = obj.plugin_ref
                 plugin_id = plugin["id"]
 
-                if plugin["enabled"]:
+                if plugin.get("running"):  # ← running!
                     win.sandbox_manager.unload(plugin_id)
-                    plugin["enabled"] = False
+                    plugin["running"] = False
+                    if hasattr(win, "remove_plugin_tab"):
+                        win.remove_plugin_tab(plugin_id)
                 else:
                     plugins_root = Path(__file__).resolve().parent.parent.parent / "plugins"
-                    plugin_dir   = plugins_root / plugin_id
+                    plugin_dir = plugins_root / plugin_id
                     if plugin_dir.exists():
                         try:
                             loaded_id = win.sandbox_manager._load_one(plugin_dir)
-                            plugin["enabled"] = bool(loaded_id)
+                            plugin["running"] = bool(loaded_id)
                         except Exception as e:
                             win.append_log(tr("log_plugin_error", e=e))
-                            plugin["enabled"] = False
+                            plugin["running"] = False
 
-                state = "enabled" if plugin["enabled"] else "disabled"
+                win.save_plugins_state()
+
+                state = "enabled" if plugin.get("running") else "disabled"
                 obj.setProperty("state", state)
                 obj.style().unpolish(obj)
                 obj.style().polish(obj)
 
                 if hasattr(obj, "status_label"):
-                    if plugin["enabled"]:
+                    if plugin.get("running"):
                         obj.status_label.setText(tr("plugin_status_on"))
                         obj.status_label.setStyleSheet(
                             "color: #4CAF50; font-size: 11px; font-weight: bold; min-width: 45px;"
@@ -136,11 +141,10 @@ class PluginsController:
                             "color: #9b2d30; font-size: 11px; font-weight: bold; min-width: 45px;"
                         )
 
-                log_key = "log_plugin_toggle_on" if plugin["enabled"] else "log_plugin_toggle_off"
+                log_key = "log_plugin_toggle_on" if plugin.get("running") else "log_plugin_toggle_off"
                 win.append_log(tr(log_key, name=plugin["name"]))
                 return True
 
-        # Передаём дальше в QMainWindow.eventFilter
         from PyQt6.QtWidgets import QMainWindow
         return QMainWindow.eventFilter(win, obj, event)
 
@@ -192,6 +196,27 @@ def build_plugins_page(win: "VPNManager") -> QWidget:
 
 def render_plugins(win: "VPNManager", filter_text: str = ""):
     layout = win.plugins_layout
+
+    # 🔄 Применяем сохранённое состояние плагинов перед рендером
+    saved_state = win.load_plugins_state()
+    for plugin in win.plugins_data:
+        plugin_id = plugin.get("id")
+        if plugin_id in saved_state:
+            should_be_running = saved_state[plugin_id]
+            if plugin.get("running") != should_be_running:
+                plugin["running"] = should_be_running
+                if should_be_running:
+                    plugins_root = Path(__file__).resolve().parent.parent.parent / "plugins"
+                    plugin_dir = plugins_root / plugin_id
+                    if plugin_dir.exists():
+                        try:
+                            win.sandbox_manager._load_one(plugin_dir)
+                        except Exception as e:
+                            win.append_log(tr("log_plugin_error", e=e))
+                            plugin["running"] = False
+                else:
+                    win.sandbox_manager.unload(plugin_id)
+
     # Очищаем старые карточки
     while layout.count():
         item = layout.takeAt(0)
@@ -200,6 +225,7 @@ def render_plugins(win: "VPNManager", filter_text: str = ""):
 
     text = filter_text.lower().strip()
     shown = 0
+
     for plugin in win.plugins_data:
         if text and text not in plugin.get("name", "").lower() and text not in plugin.get("desc", "").lower():
             continue
@@ -218,10 +244,10 @@ def create_plugin_card(win: "VPNManager", plugin: dict) -> QFrame:
     card = QFrame()
     card.setObjectName("plugin_card")
     card.plugin_ref = plugin
-    state = "enabled" if plugin.get("enabled") else "disabled"
+    state = "enabled" if plugin.get("running") else "disabled"  # ← running!
     card.setProperty("state", state)
     card.setCursor(Qt.CursorShape.PointingHandCursor)
-    win.installEventFilter(win)  # delegated через PluginsController.event_filter
+    win.installEventFilter(win)
 
     cl = QHBoxLayout(card)
     cl.setContentsMargins(12, 10, 12, 10)
@@ -243,17 +269,15 @@ def create_plugin_card(win: "VPNManager", plugin: dict) -> QFrame:
     info.addWidget(desc_lbl)
     cl.addLayout(info, 1)
 
-    status_lbl = QLabel(tr("plugin_status_on") if plugin.get("enabled") else tr("plugin_status_off"))
+    status_lbl = QLabel(tr("plugin_status_on") if plugin.get("running") else tr("plugin_status_off"))  # ← running!
     status_lbl.setStyleSheet(
-        ("color: #4CAF50;" if plugin.get("enabled") else "color: #9b2d30;")
+        ("color: #4CAF50;" if plugin.get("running") else "color: #9b2d30;")
         + " font-size: 11px; font-weight: bold; min-width: 45px;"
     )
     card.status_label = status_lbl
     cl.addWidget(status_lbl)
 
     apply_plugin_style(win, card, state)
-
-    # Чтобы eventFilter работал на карточке
     card.installEventFilter(win)
     return card
 
@@ -265,8 +289,51 @@ def apply_plugin_style(win, card: QFrame, state: str):
 
 
 def plugin_event_filter(win, obj, event):
-    """Оставлено для обратной совместимости; логика переехала в PluginsController.event_filter."""
-    return win.plugins_ctrl.event_filter(obj, event)
+    if event.type() == QEvent.Type.MouseButtonPress:
+        if hasattr(obj, "plugin_ref") and obj.objectName() == "plugin_card":
+            plugin = obj.plugin_ref
+            plugin_id = plugin["id"]
+
+            if plugin["enabled"]:
+                win.sandbox_manager.unload(plugin_id)
+                plugin["enabled"] = False
+                if hasattr(win, "remove_plugin_tab"):
+                    win.remove_plugin_tab(plugin_id)
+            # В event_filter (PluginsController):
+            else:
+                plugins_root = Path(__file__).resolve().parent.parent.parent / "plugins"
+                plugin_dir = plugins_root / plugin_id
+                if plugin_dir.exists():
+                    try:
+                        loaded_id = win.sandbox_manager._load_one(plugin_dir)
+                        plugin["running"] = bool(loaded_id)  # ← running, не enabled!
+                    except Exception as e:
+                        win.append_log(tr("log_plugin_error", e=e))
+                        plugin["running"] = False
+
+            # ✅ СОХРАНЯЕМ СОСТОЯНИЕ
+            win.save_plugins_state()
+
+            # Обновляем UI карточки
+            state = "enabled" if plugin["enabled"] else "disabled"
+            obj.setProperty("state", state)
+            obj.style().unpolish(obj)
+            obj.style().polish(obj)
+
+            if hasattr(obj, "status_label"):
+                if plugin["enabled"]:
+                    obj.status_label.setText(tr("plugin_status_on"))
+                    obj.status_label.setStyleSheet(
+                        "color: #4CAF50; font-size: 11px; font-weight: bold; min-width: 45px;")
+                else:
+                    obj.status_label.setText(tr("plugin_status_off"))
+                    obj.status_label.setStyleSheet(
+                        "color: #9b2d30; font-size: 11px; font-weight: bold; min-width: 45px;")
+
+            win.append_log(
+                tr("log_plugin_toggle_on" if plugin["enabled"] else "log_plugin_toggle_off", name=plugin["name"]))
+            return True
+    return False
 
 
 def filter_plugins(win: "VPNManager", text: str):

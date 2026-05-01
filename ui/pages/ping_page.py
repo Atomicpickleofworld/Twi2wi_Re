@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from core.ping_worker import PingWorker
 from utils.i18n import tr
+from utils.helpers import extract_config_info
 
 if TYPE_CHECKING:
     from ui.main_window import VPNManager
@@ -109,11 +110,12 @@ class FlowLayout(QLayout):
 class PingController:
     def __init__(self, win: "VPNManager"):
         self.win = win
-        self.ping_hosts: dict[str, str] = {}   # name -> host
-        self.ping_order: list[str] = []        # порядок отображения
+        self.ping_hosts: dict[str, str] = {}
+        self.ping_order: list[str] = []
         self.ping_favorites: set[str] = set()
-        self.ping_cards: dict[str, QFrame] = {}# активные карточки
+        self.ping_cards: dict[str, QFrame] = {}
         self.ping_worker: PingWorker | None = None
+        self._temp_ping_name = None
 
     def setup(self):
         self.load_ping_state()
@@ -127,9 +129,10 @@ class PingController:
 
     def cleanup(self):
         if self.ping_worker and self.ping_worker.isRunning():
+            if self._temp_ping_name:
+                self.ping_worker.remove_host(self._temp_ping_name)
             self.ping_worker.stop()
             self.ping_worker.wait(1000)
-
     def start_ping_monitor(self):
         hosts = [(name, self.ping_hosts[name]) for name in self.ping_order if name in self.ping_hosts]
         self.ping_worker = PingWorker(hosts)
@@ -258,9 +261,51 @@ class PingController:
             elif item.layout():
                 self._clear_layout(item.layout())
 
+    def request_ping_for_config(self, cfg: dict):
+        """Добавляет временный хост в пингер для отслеживания статуса выбранного конфига."""
+        info = extract_config_info(cfg)
+        host = info.get("host")
+        if not host:
+            # Удаляем временный хост, если был
+            if self._temp_ping_name and self.ping_worker:
+                self.ping_worker.remove_host(self._temp_ping_name)
+            self._temp_ping_name = None
+            self.win.current_ping_host = None
+            self.win.connect_ctrl.update_status_from_ping(-1, 100)
+            return
+
+        # Если пингер ещё не запущен – запускаем
+        if not self.ping_worker or not self.ping_worker.isRunning():
+            self.start_ping_monitor()
+            # Небольшая задержка, чтобы пингер успел инициализироваться
+            from time import sleep
+            sleep(0.2)
+
+        # Если хост уже отслеживается – ничего не меняем
+        if self.win.current_ping_host == host:
+            return
+
+        # Удаляем старый временный хост
+        if self._temp_ping_name and self.ping_worker:
+            self.ping_worker.remove_host(self._temp_ping_name)
+
+        # Создаём уникальное временное имя
+        temp_name = f"_temp_{host.replace('.', '_').replace(':', '_')}"
+        self._temp_ping_name = temp_name
+        self.win.current_ping_host = host
+
+        # Добавляем хост в пингер
+        if self.ping_worker:
+            self.ping_worker.add_host(temp_name, host)
+            # Принудительно не нужно – пингер сам делает циклы
+
+        # Пока нет пинга – ставим оффлайн
+        self.win.connect_ctrl.update_status_from_ping(-1, 100)
+
     # ── Обработка результатов пинга ───────────────────────────────────
 
     def on_ping_result(self, name: str, ms: int, loss: float, stats: dict):
+        # print(f"[DEBUG] on_ping_result: name={name}, ms={ms}, loss={loss}, temp_name={self._temp_ping_name}, current_host={getattr(self.win, 'current_ping_host', None)}")
         card = self.ping_cards.get(name)
         if not card:
             return
@@ -295,7 +340,13 @@ class PingController:
         else:
             stats_label.setText("—")
 
-        self.win.sandbox_manager.trigger_hook("on_ping_result", name=name, ms=ms, loss=loss)
+        if hasattr(self.win, "current_ping_host") and self.win.current_ping_host:
+            if (self._temp_ping_name and name == self._temp_ping_name) or \
+               (self.ping_hosts.get(name) == self.win.current_ping_host) or \
+               (name == self.win.current_ping_host):
+                self.win.connect_ctrl.update_status_from_ping(ms, loss)
+
+
 
     # ── Сохранение / загрузка ─────────────────────────────────────────
 
@@ -335,6 +386,7 @@ class PingController:
 
     def _config_file(self) -> Path:
         return Path(__file__).resolve().parent.parent.parent / "ui_config.json"
+
 
 
 # ────────────────────────────────────────────────────────────────────────

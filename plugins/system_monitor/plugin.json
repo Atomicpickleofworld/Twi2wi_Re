@@ -1,0 +1,11 @@
+{
+  "id": "system_monitor",
+  "name": "📊 System Monitor",
+  "version": "1.0.0",
+  "entry": "main.py",
+  "permissions": [
+    "hooks:read",
+    "notify:ui"
+  ],
+  "description": "Показывает загрузку CPU/RAM и уведомляет о высокой нагрузке"
+}

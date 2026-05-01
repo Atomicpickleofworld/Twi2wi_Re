@@ -156,5 +156,33 @@
   "sec_error_validation_title": "Ошибка валидации",
   "sec_error_parser_title": "Ошибка парсера",
   "sec_error_security_title": "Безопасность",
-  "sec_error_save_failed": "Не удалось добавить конфиг:\n{error}"
+  "sec_error_save_failed": "Не удалось добавить конфиг:\n{error}",
+
+
+  "connect_info_title": "ИНФОРМАЦИЯ О КОНФИГЕ",
+  "connect_meta_server": "🌐 Сервер:",
+  "connect_meta_port": "🔌 Порт:",
+  "connect_meta_proto": "📡 Протокол:",
+  "connect_ping_label": "⚡ Пинг до сервера:",
+  "connect_ping_none": "—",
+  "connect_ping_testing": "Измерение...",
+  "connect_ping_fail": "Нет ответа / Блок",
+  "connect_ping_no_host": "Адрес не указан",
+  "config_copy": "📋 Копировать конфиг",
+  "config_toggle_fav": "В избранное",
+
+
+  "connect_page_fav_title": "⭐ ИЗБРАННОЕ",
+  "connect_page_all_title": "📁 ВСЕ КОНФИГУРАЦИИ",
+
+  "config_info_server": "Сервер: {host}",
+  "config_info_method": "Метод: {method}",
+  "config_info_status_online": "Статус: 🟢 онлайн",
+  "config_info_status_offline": "Статус: 🔴 оффлайн",
+  "config_info_ping": "Пинг: {ms} мс",
+  "ping_unknown": "—",
+  
+  "status_online": "онлайн",
+  "status_offline": "оффлайн"
+
 }
